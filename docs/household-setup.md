@@ -12,7 +12,7 @@ A newly created or existing pre-migration household starts at leadership. Refres
 
 1. **Leadership** confirms the initial Owner as household lead. One leader is sufficient.
 2. **Members** reuses one-use invitations and may be acknowledged without creating or redeeming one.
-3. **Rooms** creates the operating areas for later Systems. At least one active Room is required.
+3. **Rooms** records a friendly name and canonical type so Cradle can infer useful routine defaults. At least one active Room is required.
 4. **Pets** optionally records animals who may need future care. A household may continue with none.
 5. **Companion** creates the shared cat avatar from the production layered sprite sheets. Defaults are valid and editable.
 6. **Review** shows the household, lead, members, ordered Rooms, Pets when present, and Companion.
@@ -22,9 +22,9 @@ Pets are household participants for care planning but never authenticated users 
 
 ## Relationship to the operating loop
 
-Rooms provide operating areas. Future Household Systems will document repeatable processes with purpose, participants, triggers, prerequisites, ordered steps, and a definition of done. Scheduling will create upcoming work; delegation will distribute it; Today’s Mission will surface attention; Weekly Review will support planning and improvement.
+Rooms and Pets provide the context for Dashboard recommendations. On completion Cradle routes directly to `/dashboard`, where the household chooses routines without entering a second technical setup product.
 
-Systems, schedules, delegation, tasks, pet-care work, Companion reactions, Today’s Mission, and Weekly Review are explicitly deferred.
+Cradle then creates internal System definitions with ordered steps and responsibility. Scheduling, recurrence expansion, actual delegation/rotation, task/execution instances, pet-care execution, Companion reactions, actionable Today’s Mission, and Weekly Review are explicitly deferred.
 
 ## Local review reliability
 

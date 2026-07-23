@@ -15,8 +15,8 @@ export async function onRequestGet({ request, env }: Context): Promise<Response>
         lead: { displayName: identity.displayName, role: identity.role }, members: [], rooms: [], pets: [] }, requestId);
     }
     const [members, rooms, pets, companion] = await Promise.all([
-      db.prepare("SELECT display_name AS displayName, profile_reference AS profileReference, role FROM members WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all(),
-      db.prepare("SELECT id, name, description, display_order AS displayOrder FROM rooms WHERE household_id = ? AND is_active = 1 ORDER BY display_order, created_at").bind(identity.householdId).all(),
+      db.prepare("SELECT id, display_name AS displayName, profile_reference AS profileReference, role FROM members WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all(),
+      db.prepare("SELECT id, name, description, room_type AS roomType, display_order AS displayOrder FROM rooms WHERE household_id = ? AND is_active = 1 ORDER BY display_order, created_at").bind(identity.householdId).all(),
       db.prepare("SELECT id, name, pet_type AS petType, breed, notes FROM pets WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all(),
       db.prepare(`SELECT id, name, fur_palette_key AS furPaletteKey, patch_primary_palette_key AS patchPrimaryPaletteKey,
         patch_secondary_palette_key AS patchSecondaryPaletteKey, expression_key AS expressionKey

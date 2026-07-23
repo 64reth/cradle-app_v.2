@@ -10,13 +10,28 @@ const setup = (step: string, canConfigure = true, pets: object[] = []) => ({ ok:
   state: { status: step === "complete" ? "complete" : "incomplete", step }, canConfigure,
   household: { name: "Fox House", reference: "fox" }, lead: { displayName: "Alex", role: "owner" },
   members: [{ displayName: "Alex", profileReference: "alex", role: "owner" }],
-  rooms: [{ id: "r1", name: "Kitchen", description: null, displayOrder: 0 }], pets, companion: null
+  rooms: [{ id: "r1", name: "Kitchen", roomType: "kitchen", description: null, displayOrder: 0 }], pets, companion: null
 } });
+const dashboard = { ok: true, data: {
+  household: { name: "Fox House", reference: "fox" }, currentUser: { id: "owner", displayName: "Alex", role: "owner" },
+  members: [{ id: "owner", displayName: "Alex", role: "owner" }],
+  rooms: [{ id: "r1", name: "Kitchen", roomType: "kitchen" }], pets: [], companion: null,
+  setup: { canManage: true, routinesChosen: false, readyForPlanning: false, steps: [
+    { key: "household", label: "Household created", complete: true },
+    { key: "rooms", label: "Rooms added", complete: true },
+    { key: "members", label: "Family added", complete: true },
+    { key: "routines", label: "Routines chosen", complete: false },
+    { key: "planning", label: "Ready for planning", complete: false }
+  ] },
+  recommendations: [], routines: [], activeRoutineCount: 0,
+  todayMission: { state: "setup", message: "Choose a few household routines and Cradle will build your daily plan." },
+  currentDate: "2026-07-23", deferredModules: ["Plan", "Calendar", "Messages"]
+} };
 function mockState(step: string, role = "owner", canConfigure = true, pets: object[] = []) {
   vi.stubGlobal("fetch", vi.fn().mockImplementationOnce(() => response(200, session(step, role, step === "complete" ? "complete" : "incomplete")))
-    .mockImplementationOnce(() => response(200, setup(step, canConfigure, pets))));
+    .mockImplementationOnce(() => response(200, step === "complete" ? dashboard : setup(step, canConfigure, pets))));
 }
-afterEach(() => { vi.restoreAllMocks(); window.sessionStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); });
 describe("household onboarding", () => {
   it("still renders public entry", async () => {
     vi.stubGlobal("fetch", vi.fn(() => response(401, { ok: false, error: { message: "Sign in" } }))); render(<App />);
@@ -28,7 +43,14 @@ describe("household onboarding", () => {
   it("renders optional Pets from the shared type source", async () => { mockState("pets"); render(<App />); expect(await screen.findByText(/Who else needs care/i)).toBeInTheDocument(); expect(screen.getByRole("option", { name: "Guinea Pig" })).toBeInTheDocument(); expect(screen.getByRole("button", { name: "Continue with no pets" })).toBeInTheDocument(); });
   it("renders Companion defaults after Pets", async () => { mockState("companion"); render(<App />); expect(await screen.findByText(/Meet your shared Cradle Cat/i)).toBeInTheDocument(); expect(screen.getByLabelText("Companion name")).toHaveValue("Cradle Cat"); expect(screen.getByRole("img", { name: /Cradle Cat/ })).toBeInTheDocument(); });
   it("includes Pets in review only when present", async () => { mockState("review", "owner", true, [{ id: "p1", name: "Miso", petType: "cat", breed: null, notes: null }]); render(<App />); expect(await screen.findByRole("heading", { name: "Pets" })).toBeInTheDocument(); expect(screen.getByText(/Miso · Cat/)).toBeInTheDocument(); });
-  it("renders completed household home with Rooms", async () => { mockState("complete"); render(<App />); expect(await screen.findByText(/household foundation is ready/i)).toBeInTheDocument(); expect(screen.getByText("Kitchen")).toBeInTheDocument(); });
+  it("routes completed onboarding directly to the honest Dashboard", async () => {
+    mockState("complete"); render(<App />);
+    expect(await screen.findByText(/Let’s get your household running/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Good .* Alex/i })).toBeInTheDocument();
+    expect(screen.getByText(/Choose a few household routines/i)).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/dashboard");
+    expect(screen.queryByText(/On track|Behind|Completed tasks/i)).not.toBeInTheDocument();
+  });
   it("renders a safe waiting state for non-Owners", async () => { mockState("rooms", "adult", false); render(<App />); expect(await screen.findByText(/household lead is setting things up/i)).toBeInTheDocument(); });
   it("shows network retry", async () => { vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline")))); render(<App />); expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument(); });
   it("opens the create form accessibly", async () => { vi.stubGlobal("fetch", vi.fn(() => response(401, {}))); render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Create Household" })); expect(screen.getByLabelText("Household name")).toBeInTheDocument(); });

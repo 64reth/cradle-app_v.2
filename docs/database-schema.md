@@ -14,7 +14,7 @@ Existing households receive the safe defaults `incomplete` and `leadership`; no 
 
 ## Rooms
 
-Rooms belong to exactly one household. Active names are case-insensitively unique within that household, display order is explicit, and removal sets `is_active = 0`. Rooms establish operating areas for later Household Systems; they do not contain tasks or schedules.
+Rooms belong to exactly one household. Active names are case-insensitively unique within that household, display order is explicit, and removal sets `is_active = 0`. Migration `0004` adds a canonical `room_type` used by the recommendation catalog. Legacy Rooms safely default to `other`; new onboarding captures the type explicitly.
 
 ## Pets
 
@@ -27,3 +27,19 @@ All Room and Pet reads and writes include the authenticated household ID. Foreig
 ## Companion
 
 One active Companion configuration belongs to each configured household. It stores a validated name, stable Fur/Patch palette keys, a stable expression key, active state and timestamps. It has no foreign-key relationship to members, Pets, roles, invitations, or sessions. See `docs/companion-assets.md`.
+
+## Household Systems
+
+Additive migration `0004_household_systems.sql` introduces:
+
+- `household_systems`: the internal aggregate root, including lifecycle, Room/Pet context, canonical owner, simple frequency, optional future-rotation intent, source provenance, ordering, and audit timestamps;
+- `household_system_steps`: canonical or custom ordered reusable instructions;
+- `household_system_participants`: eligible Members selected for future rotation (never Pets).
+
+Every primary and foreign key includes `household_id` where needed, so a System cannot reference another household’s Room, Pet, Member, or child record. The canonical owner is only `owner_member_id`.
+
+Generated routines store `source_template_key`, template version, source kind, and whether household-facing fields were customised. A live template/context tuple is unique, allowing the same template for two distinct Rooms while making repeated setup idempotent. Custom routines use a stable household-scoped client key.
+
+Frequency values are plain product choices: daily, weekdays, weekends, twice/three times weekly, weekly, fortnightly, monthly, as needed, or custom. They are intent only—there are no dates, recurrence expansions, completion flags, task instances, supplies, dependency engines, or skip-rule engines.
+
+Routine setup resolves templates on the server and uses one D1 batch. Archive preserves definitions and children for history. See `docs/household-systems.md`.

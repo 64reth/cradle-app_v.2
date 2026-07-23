@@ -1,7 +1,8 @@
 import { authenticate, textField } from "../../auth";
-import { ApiError, conflictError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success } from "../../http";
+import { ApiError, conflictError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success, validationError } from "../../http";
 import { optionalText, requireHouseholdManager, requireStep } from "../../setup";
 import type { CradleEnv } from "../../types";
+import { inferRoomType, isRoomType } from "../../../../shared/routines";
 type Context = { request: Request; env: CradleEnv; params: { roomId: string } };
 async function permit(db: D1Database, identity: Awaited<ReturnType<typeof authenticate>>) {
   if (identity.setupStatus === "incomplete") await requireStep(db, identity, "rooms");
@@ -11,10 +12,12 @@ export async function onRequestPatch({ request, env, params }: Context) {
   return handleApiRequest(request, async (requestId) => {
     const db = requireD1(env); const identity = await authenticate(request, db); await permit(db, identity);
     const body = await parseJsonBody(request); const name = textField(body, "name", 1, 80);
+    const roomType = body.roomType === undefined ? inferRoomType(name) : body.roomType;
+    if (!isRoomType(roomType)) throw validationError("Choose a supported Room type.");
     const description = optionalText(body, "description", 500);
     try {
-      const result = await db.prepare("UPDATE rooms SET name = ?, description = ?, updated_at = ? WHERE household_id = ? AND id = ? AND is_active = 1")
-        .bind(name, description, new Date().toISOString(), identity.householdId, params.roomId).run();
+      const result = await db.prepare("UPDATE rooms SET name = ?, description = ?, room_type = ?, updated_at = ? WHERE household_id = ? AND id = ? AND is_active = 1")
+        .bind(name, description, roomType, new Date().toISOString(), identity.householdId, params.roomId).run();
       if (!result.meta.changes) throw new ApiError(404, "NOT_FOUND", "Room not found.");
     } catch (error) {
       if (String(error).includes("UNIQUE constraint")) throw conflictError("An active Room with that name already exists.");

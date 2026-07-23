@@ -1,58 +1,26 @@
 import { type CSSProperties, FormEvent, useCallback, useEffect, useState } from "react";
 import { PET_TYPES, type PetType } from "../shared/pets";
 import { FUR_PALETTE, PATCH_PRIMARY_PALETTE, PATCH_SECONDARY_PALETTE, type CompanionPaletteKey } from "../shared/companion";
+import { ROOM_TYPES, type RoomType } from "../shared/routines";
 import { Companion, type CompanionConfig } from "./Companion";
+import {
+  api, ApiResponseError, developmentAuthenticatedStorageKey, developmentRuntimeHeader, envelope,
+  failureMessage, jsonInit, RuntimeChangedError, TransportError
+} from "./api";
+import { SystemsLibrary } from "./Systems";
+import { Dashboard, type DashboardData } from "./Dashboard";
 
 type Role = "owner" | "parent_admin" | "adult" | "child";
 type Step = "leadership" | "members" | "rooms" | "pets" | "companion" | "review" | "complete";
 type Session = { household: { name: string; reference: string }; member: { displayName: string; reference: string; role: Role };
   expiresAt: string; setup: { status: "incomplete" | "complete"; step: Step } };
-type Member = { displayName: string; profileReference: string; role: Role };
-type Room = { id: string; name: string; description: string | null; displayOrder: number };
+type Member = { id: string; displayName: string; profileReference: string; role: Role };
+type Room = { id: string; name: string; roomType: RoomType; description: string | null; displayOrder: number };
 type Pet = { id: string; name: string; petType: PetType; breed: string | null; notes: string | null };
 type Setup = { state: { status: "incomplete" | "complete"; step: Step }; canConfigure: boolean;
   household: { name: string; reference: string }; lead: { displayName: string; role: Role };
   members: Member[]; rooms: Room[]; pets: Pet[]; companion: (CompanionConfig & { id: string }) | null };
-type Envelope<T> = { ok: true; data: T; requestId?: string } | { ok: false; error: { code?: string; message: string }; requestId?: string };
 type View = "home" | "create" | "join" | "sign-in";
-const developmentRuntimeHeader = "X-Cradle-Dev-Runtime-ID";
-const developmentRuntimeStorageKey = "cradle-development-runtime-id";
-const developmentAuthenticatedStorageKey = "cradle-development-authenticated";
-
-class TransportError extends Error {}
-class RuntimeChangedError extends Error {}
-class ApiResponseError extends Error {
-  constructor(message: string, public requestId?: string, public code?: string, public status?: number) { super(message); }
-}
-async function envelope<T>(path: string, init?: RequestInit): Promise<{ response: Response; body: Envelope<T> }> {
-  let response: Response;
-  try { response = await fetch(path, { credentials: "same-origin", ...init }); }
-  catch { throw new TransportError("Cradle couldn’t connect"); }
-  const runtimeId = response.headers.get(developmentRuntimeHeader);
-  if (runtimeId && typeof window !== "undefined") {
-    const previous = window.sessionStorage.getItem(developmentRuntimeStorageKey);
-    window.sessionStorage.setItem(developmentRuntimeStorageKey, runtimeId);
-    if (previous && previous !== runtimeId) {
-      window.dispatchEvent(new Event("cradle-development-runtime-changed"));
-      throw new RuntimeChangedError("Cradle has restarted during development.");
-    }
-  }
-  try { return { response, body: await response.json() as Envelope<T> }; }
-  catch { throw new ApiResponseError("Cradle received an invalid server response.", response.headers.get("X-Request-ID") || undefined, "INVALID_RESPONSE", response.status); }
-}
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const { response, body } = await envelope<T>(path, init);
-  if (!body.ok) throw new ApiResponseError(body.error.message, body.requestId, body.error.code, response.status);
-  return body.data;
-}
-function failureMessage(reason: unknown): string {
-  if (reason instanceof TransportError) return reason.message;
-  if (reason instanceof ApiResponseError) return `${reason.message}${reason.requestId ? ` Request ID: ${reason.requestId}` : ""}`;
-  return "Cradle could not complete the request.";
-}
-const jsonInit = (method: string, body: object = {}): RequestInit => ({
-  method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-});
 function Field({ label, name, type = "text", defaultValue }: { label: string; name: string; type?: string; defaultValue?: string }) {
   return <label><span>{label}</span><input name={name} type={type} defaultValue={defaultValue} required={!label.startsWith("Optional")} /></label>;
 }
@@ -135,12 +103,15 @@ function RoomsStage({ setup, refresh, advance }: { setup: Setup; refresh: () => 
     try { await api("/api/household/rooms/reorder", jsonInit("POST", { roomIds: rooms.map(({ id }) => id) })); await refresh(); }
     catch (reason) { setError(failureMessage(reason)); }
   }
+  const roomType = (value?: RoomType) => <label><span>Room type</span><select name="roomType" defaultValue={value || "kitchen"}>
+    {ROOM_TYPES.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}</select></label>;
   return <section className="card stage"><p className="eyebrow">Rooms</p><h1>Map where household life happens.</h1>
-    <p>Rooms become the operating areas for future household Systems. Add at least one.</p>
-    <form className="inline-form" onSubmit={(event) => save(event)}><Field label="Room name" name="name" /><Field label="Optional description" name="description" />
+    <p>Room types help Cradle suggest a sensible starting routine. Add at least one.</p>
+    <form className="inline-form" onSubmit={(event) => save(event)}><Field label="Room name" name="name" />{roomType()}<Field label="Optional description" name="description" />
       <button>Add Room</button></form><p className="suggestions">Suggestions: Kitchen · Living Room · Bathroom · Bedroom · Hallway · Garden</p>
     <div className="editable-list">{setup.rooms.map((room, index) => <form key={room.id} onSubmit={(event) => save(event, room.id)}>
-      <Field label="Room name" name="name" defaultValue={room.name} /><Field label="Optional description" name="description" defaultValue={room.description || ""} />
+      <Field label="Room name" name="name" defaultValue={room.name} />{roomType(room.roomType)}
+      <Field label="Optional description" name="description" defaultValue={room.description || ""} />
       <div className="row-actions"><button>Save</button><button type="button" onClick={() => move(index, -1)} aria-label={`Move ${room.name} up`}>↑</button>
         <button type="button" onClick={() => move(index, 1)} aria-label={`Move ${room.name} down`}>↓</button>
         <button type="button" onClick={() => remove(room.id)}>Remove</button></div></form>)}</div>
@@ -236,27 +207,20 @@ function Review({ setup, complete }: { setup: Setup; complete: () => Promise<voi
     {setup.companion && <div><h2>Companion</h2><Companion config={setup.companion} /><p>{setup.companion.name} · Fur: {FUR_PALETTE.find(({ key }) => key === setup.companion?.furPaletteKey)?.label}
       {" · "}Patch 1: {PATCH_PRIMARY_PALETTE.find(({ key }) => key === setup.companion?.patchPrimaryPaletteKey)?.label}
       {" · "}Patch 2: {PATCH_SECONDARY_PALETTE.find(({ key }) => key === setup.companion?.patchSecondaryPaletteKey)?.label}</p></div>}
-    <p>Rooms provide operating areas. Later, Household Systems will document repeatable processes; scheduling and delegation will turn them into shared work. Today’s Mission and Weekly Review will support attention and improvement.</p>
+    <p>Rooms and Pets provide context for Household Systems after setup. Scheduling, generated tasks, Today’s Mission and Weekly Review arrive in later phases.</p>
     <button className="primary" onClick={complete}>Complete household setup</button></section>;
-}
-
-function HouseholdHome({ session, setup, signOut }: { session: Session; setup: Setup; signOut: () => Promise<void> }) {
-  return <div className="landing"><header className="card household-header"><div><p className="eyebrow">Household home</p><h1>{session.household.name}</h1>
-    <p>Signed in as <strong>{session.member.displayName}</strong> · {session.member.role.replace("_", " ")}</p></div><button onClick={signOut}>Sign out</button></header>
-    <section className="card"><h2>Rooms</h2><ul className="record-list">{setup.rooms.map((room) => <li key={room.id}>{room.name}</li>)}</ul></section>
-    {setup.pets.length > 0 && <section className="card"><h2>Pets</h2><ul className="record-list">{setup.pets.map((pet) => <li key={pet.id}>{pet.name}</li>)}</ul></section>}
-    {setup.companion && <section className="card"><h2>{setup.companion.name}</h2><Companion config={{ ...setup.companion, expressionKey: "neutral" }} />
-      <p>Your neutral household Companion. Progress reactions arrive later.</p></section>}
-    <aside className="card placeholder"><h2>The household foundation is ready.</h2><p>Systems, schedules, pet-care responsibilities, tasks, Today’s Mission and Weekly Review arrive later.</p></aside></div>;
 }
 
 export function App() {
   const [view, setView] = useState<View>("home"); const [state, setState] = useState<"loading" | "public" | "ready" | "network" | "problem" | "restarted">("loading");
   const [session, setSession] = useState<Session | null>(null); const [setup, setSetup] = useState<Setup | null>(null); const [error, setError] = useState("");
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [householdView, setHouseholdView] = useState<"dashboard" | "systems">(() => window.location.pathname === "/systems" ? "systems" : "dashboard");
+  const [dashboardSetupRequested, setDashboardSetupRequested] = useState(false);
   const [developmentResetNotice, setDevelopmentResetNotice] = useState("");
   const clearDevelopmentSession = useCallback(() => {
     window.sessionStorage.removeItem(developmentAuthenticatedStorageKey);
-    setSession(null); setSetup(null);
+    setSession(null); setSetup(null); setDashboard(null);
   }, []);
   useEffect(() => {
     const handleRuntimeChange = () => { clearDevelopmentSession(); setState("restarted"); };
@@ -277,8 +241,17 @@ export function App() {
         setState("public"); return;
       }
       if (!body.ok) throw new ApiResponseError(body.error.message, body.requestId, body.error.code, response.status);
-      window.sessionStorage.setItem(developmentAuthenticatedStorageKey, "true");
-      const setupData = await api<Setup>("/api/household/setup"); setSession(body.data); setSetup(setupData); setDevelopmentResetNotice(""); setState("ready");
+      window.sessionStorage.setItem(developmentAuthenticatedStorageKey, "true"); setSession(body.data);
+      if (body.data.setup.status === "complete") {
+        const dashboardData = await api<DashboardData>("/api/dashboard");
+        setDashboard(dashboardData); setSetup(null);
+        const route = window.location.pathname === "/systems" ? "systems" : "dashboard";
+        setHouseholdView(route);
+        if (window.location.pathname !== `/${route}`) window.history.replaceState({}, "", `/${route}`);
+      } else {
+        const setupData = await api<Setup>("/api/household/setup"); setSetup(setupData); setDashboard(null);
+      }
+      setDevelopmentResetNotice(""); setState("ready");
     } catch (reason) {
       if (reason instanceof RuntimeChangedError) { clearDevelopmentSession(); setState("restarted"); return; }
       setError(failureMessage(reason));
@@ -286,16 +259,32 @@ export function App() {
     }
   }, [clearDevelopmentSession]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const pop = () => setHouseholdView(window.location.pathname === "/systems" ? "systems" : "dashboard");
+    window.addEventListener("popstate", pop); return () => window.removeEventListener("popstate", pop);
+  }, []);
   const refreshSetup = useCallback(async () => { setSetup(await api<Setup>("/api/household/setup")); }, []);
+  const navigateHousehold = useCallback((next: "dashboard" | "systems") => {
+    setHouseholdView(next); window.history.pushState({}, "", `/${next}`);
+  }, []);
   async function transition(path: string) { setError(""); try { await api(path, jsonInit(path.endsWith("leadership") ? "PATCH" : "POST")); await load(); } catch (reason) { setError(failureMessage(reason)); } }
-  async function signOut() { try { await api("/api/auth/sign-out", jsonInit("POST")); } finally { clearDevelopmentSession(); setState("public"); setView("home"); } }
+  async function signOut() { try { await api("/api/auth/sign-out", jsonInit("POST")); } finally {
+    clearDevelopmentSession(); setState("public"); setView("home"); setHouseholdView("dashboard");
+    window.history.replaceState({}, "", "/");
+  } }
   if (state === "loading") return <main className="app-shell"><p className="loading" role="status">Opening Cradle…</p></main>;
   if (state === "restarted") return <main className="app-shell"><section className="card stage"><h1>Cradle has restarted during development.</h1><p>Reload to connect this page to the current local runtime.</p><button className="primary" onClick={() => window.location.reload()}>Reload</button></section></main>;
   if (state === "network") return <main className="app-shell"><section className="card"><h1>Cradle couldn’t connect.</h1><button className="primary" onClick={load}>Retry</button></section></main>;
   if (state === "problem") return <main className="app-shell"><section className="card stage"><h1>Cradle couldn’t load this household.</h1><ErrorMessage value={error} />
     <button className="primary" onClick={load}>Retry with a fresh request</button></section></main>;
+  if (state === "ready" && session && dashboard) {
+    return <main className="dashboard-app">{householdView === "systems"
+      ? <SystemsLibrary navigate={navigateHousehold} signOut={() => void signOut()}
+        addRoutine={() => { setDashboardSetupRequested(true); navigateHousehold("dashboard"); }} />
+      : <Dashboard data={dashboard} setData={setDashboard} navigate={navigateHousehold} signOut={() => void signOut()}
+        startSetup={dashboardSetupRequested} onSetupOpened={() => setDashboardSetupRequested(false)} />}</main>;
+  }
   if (state === "ready" && session && setup) {
-    if (setup.state.status === "complete") return <main className="app-shell"><HouseholdHome session={session} setup={setup} signOut={signOut} /></main>;
     if (!setup.canConfigure) return <main className="app-shell"><section className="card stage"><p className="eyebrow">Setup in progress</p><h1>Your household lead is setting things up.</h1>
       <p>You can return when the Owner has completed the household foundation.</p><button onClick={signOut}>Sign out</button></section></main>;
     return <main className="app-shell"><Progress step={setup.state.step} /><ErrorMessage value={error} />

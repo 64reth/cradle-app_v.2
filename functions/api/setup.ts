@@ -3,13 +3,28 @@ import { authorizationError, validationError } from "./http";
 import type { JsonRecord } from "./types";
 
 export type SetupStep = "leadership" | "members" | "rooms" | "pets" | "companion" | "review" | "complete";
+export type HouseholdRoutineAccess = "manage" | "view_active" | "none";
+
+export function householdRoutineAccess(identity: Identity): HouseholdRoutineAccess {
+  if (identity.role === "owner" || identity.role === "parent_admin") return "manage";
+  if (identity.role === "adult") return "view_active";
+  return "none";
+}
 
 export function requireSetupOwner(identity: Identity): void {
   if (identity.role !== "owner") throw authorizationError("Only the household Owner can change initial setup.");
 }
 
 export function requireHouseholdManager(identity: Identity): void {
-  if (identity.role !== "owner" && identity.role !== "parent_admin") throw authorizationError();
+  if (householdRoutineAccess(identity) !== "manage") throw authorizationError();
+}
+
+export function requireSystemsViewer(identity: Identity): "all" | "active" {
+  if (identity.setupStatus !== "complete") throw authorizationError("Complete household setup before opening Systems.");
+  const access = householdRoutineAccess(identity);
+  if (access === "manage") return "all";
+  if (access === "view_active") return "active";
+  throw authorizationError("Systems are not available for this profile.");
 }
 
 export function optionalText(body: JsonRecord, field: string, max: number): string | null {

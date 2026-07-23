@@ -16,7 +16,8 @@ beforeEach(() => {
   dbPath = join(workspace, "cradle.sqlite");
   const migration = readFileSync("migrations/0001_foundation.sql", "utf8") +
     readFileSync("migrations/0002_authentication.sql", "utf8") +
-    readFileSync("migrations/0003_household_setup_rooms_and_pets.sql", "utf8");
+    readFileSync("migrations/0003_household_setup_rooms_and_pets.sql", "utf8") +
+    readFileSync("migrations/0004_household_systems.sql", "utf8");
   writeFileSync(join(workspace, "migration.sql"), migration);
   sqlite(migration);
 });
@@ -26,12 +27,13 @@ afterEach(() => {
 });
 
 describe("authentication migration", () => {
-  it("applies all three migrations and setup domain tables", () => {
+  it("applies all four migrations and operational domain tables", () => {
     const tables = sqlite("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       .trim()
       .split("\n");
 
-    expect(tables).toEqual(["authentication_attempts", "companions", "households", "invitation_codes", "members", "pets", "rooms", "sessions"]);
+    expect(tables).toEqual(["authentication_attempts", "companions", "household_system_participants", "household_system_steps",
+      "household_systems", "households", "invitation_codes", "members", "pets", "rooms", "sessions"]);
   });
 
   it("enforces foreign keys", () => {
@@ -97,12 +99,12 @@ describe("authentication migration", () => {
     sqlite(`
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
-      INSERT INTO rooms VALUES ('r1', 'h1', ' Kitchen ', NULL, 0, 1, 'now', 'now');
-      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now');
+      INSERT INTO rooms VALUES ('r1', 'h1', ' Kitchen ', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
       UPDATE rooms SET is_active = 0 WHERE household_id = 'h1';
-      INSERT INTO rooms VALUES ('r3', 'h1', 'Kitchen', NULL, 1, 1, 'now', 'now');
+      INSERT INTO rooms VALUES ('r3', 'h1', 'Kitchen', NULL, 1, 1, 'now', 'now', 'kitchen');
     `);
-    expect(() => sqlite("INSERT INTO rooms VALUES ('r4', 'h1', 'kitchen', NULL, 2, 1, 'now', 'now');")).toThrow();
+    expect(() => sqlite("INSERT INTO rooms VALUES ('r4', 'h1', 'kitchen', NULL, 2, 1, 'now', 'now', 'kitchen');")).toThrow();
   });
 
   it("accepts every supported Pet type and optional fields", () => {
@@ -128,5 +130,119 @@ describe("authentication migration", () => {
     `);
     expect(sqlite("SELECT (SELECT count(*) FROM companions) || '|' || (SELECT count(*) FROM members) || '|' || (SELECT count(*) FROM pets) || '|' || (SELECT count(*) FROM sessions);").trim()).toBe("1|0|0|0");
     expect(() => sqlite("INSERT INTO companions VALUES ('c2', 'h1', 'Other Cat', 'grey', 'cream', 'white', 'neutral', 1, 'now', 'now');")).toThrow();
+  });
+
+  it("keeps migration 0004 additive", () => {
+    const migration = readFileSync("migrations/0004_household_systems.sql", "utf8");
+    expect(migration).not.toMatch(/^\s*(DROP|DELETE\s+FROM|UPDATE)\b/im);
+    expect(migration).toContain("CREATE TABLE household_systems");
+  });
+
+  it("preserves an existing Phase 3 household when migration 0004 is applied", () => {
+    const legacyPath = join(workspace, "phase-3.sqlite");
+    const phaseThree = readFileSync("migrations/0001_foundation.sql", "utf8") +
+      readFileSync("migrations/0002_authentication.sql", "utf8") +
+      readFileSync("migrations/0003_household_setup_rooms_and_pets.sql", "utf8");
+    execFileSync("sqlite3", [legacyPath], { input: phaseThree, encoding: "utf8" });
+    execFileSync("sqlite3", [legacyPath], { input: `
+      PRAGMA foreign_keys = ON;
+      INSERT INTO households (id, name, created_at, updated_at, setup_status, setup_step)
+        VALUES ('existing', 'Existing Home', 'before', 'before', 'complete', 'complete');
+      INSERT INTO members (id, household_id, display_name, role, created_at, updated_at)
+        VALUES ('owner', 'existing', 'Alex', 'owner', 'before', 'before');
+      INSERT INTO rooms VALUES ('kitchen', 'existing', 'Kitchen', NULL, 0, 1, 'before', 'before');
+      INSERT INTO pets VALUES ('tori', 'existing', 'Tori', 'cat', NULL, NULL, 1, 'before', 'before');
+    `, encoding: "utf8" });
+    execFileSync("sqlite3", [legacyPath], {
+      input: readFileSync("migrations/0004_household_systems.sql", "utf8"), encoding: "utf8"
+    });
+    const preserved = execFileSync("sqlite3", [legacyPath], {
+      input: `SELECT h.name || '|' || h.setup_status || '|' ||
+        (SELECT count(*) FROM members WHERE household_id = h.id) || '|' ||
+        (SELECT count(*) FROM rooms WHERE household_id = h.id) || '|' ||
+        (SELECT count(*) FROM pets WHERE household_id = h.id)
+        FROM households h WHERE h.id = 'existing';`,
+      encoding: "utf8"
+    }).trim();
+    expect(preserved).toBe("Existing Home|complete|1|1|1");
+  });
+
+  it("stores a tenant-scoped generated routine with deterministic steps", () => {
+    sqlite(`
+      PRAGMA foreign_keys = ON;
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, is_active, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 1, 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, is_active, created_at, updated_at) VALUES ('m2', 'h1', 'Sam', 'adult', 1, 'now', 'now');
+      INSERT INTO rooms VALUES ('r1', 'h1', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO pets VALUES ('p1', 'h1', 'Tori', 'cat', NULL, NULL, 1, 'now', 'now');
+      INSERT INTO household_systems (id, household_id, name, purpose, pet_id, owner_member_id, status,
+        frequency_key, estimated_minutes, definition_of_done, display_order, source_kind, source_template_key,
+        source_template_version, created_at, updated_at)
+        VALUES ('sys1', 'h1', 'Feed Tori', 'Fresh food', 'p1', 'm1', 'active', 'daily', 10,
+          'Tori has food', 0, 'template', 'pet.cat.morning_feed', 1, 'now', 'now');
+      INSERT INTO household_system_steps VALUES ('step2', 'h1', 'sys1', 'Add food', 1, 1, 'now', 'now');
+      INSERT INTO household_system_steps VALUES ('step1', 'h1', 'sys1', 'Wash bowl', 0, 1, 'now', 'now');
+      INSERT INTO household_system_participants VALUES ('h1', 'sys1', 'm2', 'now');
+    `);
+    expect(sqlite("SELECT label FROM household_system_steps ORDER BY display_order;").trim().split("\n")).toEqual(["Wash bowl", "Add food"]);
+    expect(sqlite("PRAGMA foreign_key_check;")).toBe("");
+  });
+
+  it("rejects cross-household Room, Pet, owner and participant references", () => {
+    sqlite(`
+      PRAGMA foreign_keys = ON;
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m2', 'h2', 'Sam', 'owner', 'now', 'now');
+      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO pets VALUES ('p2', 'h2', 'Tori', 'cat', NULL, NULL, 1, 'now', 'now');
+    `);
+    const insert = (room: string, pet: string, owner: string) => `PRAGMA foreign_keys = ON;
+      INSERT INTO household_systems (id, household_id, name, purpose, room_id, pet_id, owner_member_id, status,
+      frequency_key, estimated_minutes, definition_of_done, display_order, source_kind, client_key, created_at, updated_at)
+      VALUES ('sys', 'h1', 'Reset', 'Purpose', ${room}, ${pet}, '${owner}', 'active', 'weekly', 10,
+        'Room ready', 0, 'custom', 'custom-one', 'now', 'now');`;
+    expect(() => sqlite(insert("'r2'", "NULL", "m1"))).toThrow();
+    expect(() => sqlite(insert("NULL", "'p2'", "m1"))).toThrow();
+    expect(() => sqlite(insert("NULL", "NULL", "m2"))).toThrow();
+  });
+
+  it("enforces child tenant scope and unique child ordering", () => {
+    sqlite(`
+      PRAGMA foreign_keys = ON;
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 'now', 'now');
+      INSERT INTO household_systems (id, household_id, name, purpose, owner_member_id, status, frequency_key,
+        estimated_minutes, definition_of_done, display_order, source_kind, client_key, created_at, updated_at)
+        VALUES ('sys1', 'h1', 'Reset', 'Purpose', 'm1', 'active', 'weekly', 10, 'Ready', 0, 'custom', 'custom-one', 'now', 'now');
+      INSERT INTO household_system_steps VALUES ('step1', 'h1', 'sys1', 'One', 0, 1, 'now', 'now');
+    `);
+    expect(() => sqlite("PRAGMA foreign_keys = ON; INSERT INTO household_system_steps VALUES ('bad', 'h2', 'sys1', 'Bad', 0, 1, 'now', 'now');")).toThrow();
+    expect(() => sqlite("INSERT INTO household_system_steps VALUES ('step2', 'h1', 'sys1', 'Two', 0, 1, 'now', 'now');")).toThrow();
+  });
+
+  it("prevents duplicate generated routines but allows the same recommendation for distinct Rooms", () => {
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 'now', 'now');
+      INSERT INTO rooms VALUES ('r1', 'h1', 'Bedroom 1', NULL, 0, 1, 'now', 'now', 'bedroom');
+      INSERT INTO rooms VALUES ('r2', 'h1', 'Bedroom 2', NULL, 1, 1, 'now', 'now', 'bedroom');
+      INSERT INTO household_systems (id, household_id, name, purpose, room_id, owner_member_id, status, frequency_key,
+        estimated_minutes, definition_of_done, display_order, source_kind, source_template_key, source_template_version, created_at, updated_at)
+        VALUES ('sys1', 'h1', 'Bedroom clean', 'Clean', 'r1', 'm1', 'active', 'weekly', 10, 'Ready', 0,
+          'template', 'bedroom.weekly_clean', 1, 'now', 'now');
+      INSERT INTO household_systems (id, household_id, name, purpose, room_id, owner_member_id, status, frequency_key,
+        estimated_minutes, definition_of_done, display_order, source_kind, source_template_key, source_template_version, created_at, updated_at)
+        VALUES ('sys2', 'h1', 'Bedroom clean', 'Clean', 'r2', 'm1', 'active', 'weekly', 10, 'Ready', 1,
+          'template', 'bedroom.weekly_clean', 1, 'now', 'now');
+    `);
+    expect(sqlite("SELECT count(*) FROM household_systems;").trim()).toBe("2");
+    expect(() => sqlite(`INSERT INTO household_systems (id, household_id, name, purpose, owner_member_id, status,
+      room_id, frequency_key, estimated_minutes, definition_of_done, display_order, source_kind, source_template_key,
+      source_template_version, created_at, updated_at)
+      VALUES ('sys3', 'h1', 'Bedroom clean', 'Duplicate', 'm1', 'active', 'r1', 'weekly', 10, 'Ready', 2,
+        'template', 'bedroom.weekly_clean', 1, 'now', 'now');`)).toThrow();
   });
 });
