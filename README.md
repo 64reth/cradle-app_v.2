@@ -4,18 +4,15 @@ Cradle is a Household Operating System. This repository is being rebuilt in smal
 
 ## Current Phase
 
-Phase 2 establishes the Cloudflare and database foundation only:
+Phase 3 adds the authentication and household-membership foundation:
 
-- Cloudflare Pages configuration
-- Pages Functions structure
-- D1 binding named `DB`
-- migration-driven database setup
-- typed API envelopes
-- D1-aware health endpoint
-- local Wrangler development scripts
-- migration and API foundation tests
+- secure PIN-based household and profile sign-in
+- server-managed, revocable sessions
+- one-use household invitations and role policy
+- tenant-scoped membership views
+- a minimal public and authenticated interface
 
-Authentication, household creation UI, rooms, routines, tasks, maintenance, companions, and dashboard functionality begin in later phases.
+Rooms, routines, tasks, maintenance, companions, and dashboard functionality remain for later phases.
 
 ## Run Locally
 
@@ -77,6 +74,7 @@ git status --short
 - Cloudflare setup: `docs/cloudflare/README.md`
 - Database workflow: `docs/database/README.md`
 - API conventions: `docs/api/README.md`
+- Authentication architecture: `docs/authentication.md`
 
 ## Production D1
 

@@ -76,6 +76,10 @@ export function authorizationError(message = "You are not allowed to perform thi
   return new ApiError(403, "AUTHORIZATION_ERROR", message);
 }
 
+export function methodNotAllowed(allowed: string): ApiError {
+  return new ApiError(405, "METHOD_NOT_ALLOWED", `Use ${allowed} for this endpoint.`);
+}
+
 export function serverError(): ApiError {
   return new ApiError(500, "SERVER_ERROR", "Cradle could not complete the request.");
 }
