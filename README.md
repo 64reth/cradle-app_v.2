@@ -10,9 +10,10 @@ Phase 3 adds the authentication and household-membership foundation:
 - server-managed, revocable sessions
 - one-use household invitations and role policy
 - tenant-scoped membership views
-- a minimal public and authenticated interface
+- resumable Leadership, Members, Rooms, optional Pets, and Review setup
+- a minimal authenticated household home
 
-Rooms, routines, tasks, maintenance, companions, and dashboard functionality remain for later phases.
+Routines, tasks, maintenance, Companion reactions, and dashboard functionality remain for later phases.
 
 ## Run Locally
 

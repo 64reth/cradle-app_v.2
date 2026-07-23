@@ -17,6 +17,8 @@ export type Identity = {
   profileReference: string;
   role: Role;
   expiresAt: string;
+  setupStatus: "incomplete" | "complete";
+  setupStep: "leadership" | "members" | "rooms" | "pets" | "companion" | "review" | "complete";
 };
 
 function bytes(length: number): Uint8Array {
@@ -106,7 +108,8 @@ export async function authenticate(request: Request, db: D1Database): Promise<Id
   const row = await db.prepare(`
     SELECT s.id AS sessionId, s.household_id AS householdId, s.member_id AS memberId,
       s.expires_at AS expiresAt, h.name AS householdName, h.lookup_reference AS householdReference,
-      m.display_name AS displayName, m.profile_reference AS profileReference, m.role AS role
+      m.display_name AS displayName, m.profile_reference AS profileReference, m.role AS role,
+      h.setup_status AS setupStatus, h.setup_step AS setupStep
     FROM sessions s
     JOIN households h ON h.id = s.household_id
     JOIN members m ON m.household_id = s.household_id AND m.id = s.member_id

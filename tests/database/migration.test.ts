@@ -15,7 +15,8 @@ beforeEach(() => {
   workspace = mkdtempSync(join(tmpdir(), "cradle-db-"));
   dbPath = join(workspace, "cradle.sqlite");
   const migration = readFileSync("migrations/0001_foundation.sql", "utf8") +
-    readFileSync("migrations/0002_authentication.sql", "utf8");
+    readFileSync("migrations/0002_authentication.sql", "utf8") +
+    readFileSync("migrations/0003_household_setup_rooms_and_pets.sql", "utf8");
   writeFileSync(join(workspace, "migration.sql"), migration);
   sqlite(migration);
 });
@@ -25,12 +26,12 @@ afterEach(() => {
 });
 
 describe("authentication migration", () => {
-  it("adds only the Phase 3 authentication table", () => {
+  it("applies all three migrations and setup domain tables", () => {
     const tables = sqlite("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       .trim()
       .split("\n");
 
-    expect(tables).toEqual(["authentication_attempts", "households", "invitation_codes", "members", "sessions"]);
+    expect(tables).toEqual(["authentication_attempts", "companions", "households", "invitation_codes", "members", "pets", "rooms", "sessions"]);
   });
 
   it("enforces foreign keys", () => {
@@ -85,5 +86,47 @@ describe("authentication migration", () => {
         VALUES ('s1', 'h1', 'm1', 'token-hash-only', 'later', 'now', 'now');
     `);
     expect(sqlite("PRAGMA foreign_key_check;")).toBe("");
+  });
+
+  it("backfills existing households as setup-incomplete at leadership", () => {
+    sqlite("INSERT INTO households (id, name, created_at, updated_at) VALUES ('existing', 'Existing', 'now', 'now');");
+    expect(sqlite("SELECT setup_status || '|' || setup_step FROM households WHERE id = 'existing';").trim()).toBe("incomplete|leadership");
+  });
+
+  it("enforces Room tenant uniqueness only for active names", () => {
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
+      INSERT INTO rooms VALUES ('r1', 'h1', ' Kitchen ', NULL, 0, 1, 'now', 'now');
+      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now');
+      UPDATE rooms SET is_active = 0 WHERE household_id = 'h1';
+      INSERT INTO rooms VALUES ('r3', 'h1', 'Kitchen', NULL, 1, 1, 'now', 'now');
+    `);
+    expect(() => sqlite("INSERT INTO rooms VALUES ('r4', 'h1', 'kitchen', NULL, 2, 1, 'now', 'now');")).toThrow();
+  });
+
+  it("accepts every supported Pet type and optional fields", () => {
+    sqlite("INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');");
+    const types = ["dog","cat","fish","bird","rabbit","hamster","guinea_pig","reptile","tortoise","horse","chicken","other"];
+    types.forEach((type, index) => sqlite(`INSERT INTO pets VALUES ('p${index}', 'h1', 'Pet', '${type}', 'Breed', 'Notes', 1, 'now', 'now');`));
+    expect(sqlite("SELECT count(*) FROM pets;").trim()).toBe("12");
+    expect(() => sqlite("INSERT INTO pets VALUES ('bad', 'h1', 'Pet', 'dragon', NULL, NULL, 1, 'now', 'now');")).toThrow();
+  });
+
+  it("keeps Pets separate from members and sessions", () => {
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO pets VALUES ('p1', 'h1', 'Miso', 'cat', NULL, NULL, 1, 'now', 'now');
+    `);
+    expect(sqlite("SELECT (SELECT count(*) FROM pets) || '|' || (SELECT count(*) FROM members) || '|' || (SELECT count(*) FROM sessions);").trim()).toBe("1|0|0");
+  });
+
+  it("stores one active Companion without creating an identity or Pet", () => {
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
+      INSERT INTO companions VALUES ('c1', 'h1', 'Cradle Cat', 'orange', 'cream', 'white', 'neutral', 1, 'now', 'now');
+    `);
+    expect(sqlite("SELECT (SELECT count(*) FROM companions) || '|' || (SELECT count(*) FROM members) || '|' || (SELECT count(*) FROM pets) || '|' || (SELECT count(*) FROM sessions);").trim()).toBe("1|0|0|0");
+    expect(() => sqlite("INSERT INTO companions VALUES ('c2', 'h1', 'Other Cat', 'grey', 'cream', 'white', 'neutral', 1, 'now', 'now');")).toThrow();
   });
 });

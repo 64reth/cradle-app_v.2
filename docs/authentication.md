@@ -32,6 +32,8 @@ Failed sign-ins are keyed by a hash of connecting IP, household reference, and p
 
 This phase has no recovery, OAuth, email identity, passkeys, session-management UI, or distributed abuse controls.
 
+After authentication, the application resolves the server-persisted household setup state. Authentication never treats Rooms or Pets as identities. Pets cannot receive PINs, invitations, roles, or sessions.
+
 ## Routes and local development
 
 - `POST /api/auth/households`, `/api/auth/sign-in`, `/api/auth/join`, `/api/auth/sign-out`

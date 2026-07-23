@@ -8,7 +8,7 @@ export async function onRequestGet({ request, env }: Context): Promise<Response>
     const identity = await authenticate(request, requireD1(env));
     return success({ household: { name: identity.householdName, reference: identity.householdReference },
       member: { displayName: identity.displayName, reference: identity.profileReference, role: identity.role },
-      expiresAt: identity.expiresAt }, requestId);
+      expiresAt: identity.expiresAt, setup: { status: identity.setupStatus, step: identity.setupStep } }, requestId);
   });
 }
 export async function onRequest(context: Context): Promise<Response> {

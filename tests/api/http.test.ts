@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { failure, handleApiRequest, parseJsonBody, success, validationError } from "../../functions/api/http";
+import { onRequest as developmentMiddleware } from "../../functions/_middleware";
 
 type TestEnvelope = { ok: boolean; data?: { requestId?: string; ready?: boolean }; error?: { code: string; message: string; details?: Record<string, string> }; requestId: string };
 
@@ -13,6 +14,7 @@ describe("API envelopes", () => {
     const body = await responseBody(response);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("X-Request-ID")).toBe("req_123");
     expect(body).toEqual({ ok: true, data: { ready: true }, requestId: "req_123" });
   });
 
@@ -21,6 +23,7 @@ describe("API envelopes", () => {
     const body = await responseBody(response);
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("X-Request-ID")).toBe("req_456");
     expect(body).toEqual({
       ok: false,
       error: { code: "VALIDATION_ERROR", message: "Bad fields", details: { name: "Required" } },
@@ -61,5 +64,22 @@ describe("API envelopes", () => {
       message: "Malformed JSON request body.",
       details: { body: "Check the JSON syntax" }
     });
+  });
+
+  it("adds a runtime ID only to development API responses and clears a reset session cookie", async () => {
+    const development = await developmentMiddleware({
+      request: new Request("http://localhost:8788/api/auth/session"),
+      env: { APP_ENV: "development" },
+      next: async () => new Response(JSON.stringify({ ok: false }), { status: 401 })
+    });
+    expect(development.headers.get("X-Cradle-Dev-Runtime-ID")).toEqual(expect.any(String));
+    expect(development.headers.get("Set-Cookie")).toContain("cradle_session=; ");
+
+    const production = await developmentMiddleware({
+      request: new Request("https://cradle.test/api/auth/session"),
+      env: { APP_ENV: "production" },
+      next: async () => success({ ready: true }, "production-request")
+    });
+    expect(production.headers.get("X-Cradle-Dev-Runtime-ID")).toBeNull();
   });
 });

@@ -28,7 +28,9 @@ export function json<T>(body: ApiEnvelope<T>, init: ResponseInit = {}): Response
 }
 
 export function success<T>(data: T, id: string, init: ResponseInit = {}): Response {
-  return json({ ok: true, data, requestId: id }, init);
+  return json({ ok: true, data, requestId: id }, {
+    ...init, headers: { ...(init.headers || {}), "X-Request-ID": id }
+  });
 }
 
 export function failure(error: ApiError, id: string): Response {
@@ -38,7 +40,7 @@ export function failure(error: ApiError, id: string): Response {
       error: { code: error.code, message: error.message, details: error.details },
       requestId: id
     },
-    { status: error.status }
+    { status: error.status, headers: { "X-Request-ID": id } }
   );
 }
 
