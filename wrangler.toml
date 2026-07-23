@@ -2,5 +2,16 @@ name = "cradle"
 compatibility_date = "2026-07-23"
 pages_build_output_dir = "dist"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "cradle-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
 [vars]
 APP_ENV = "development"
+API_VERSION = "v1"
+
+[env.production.vars]
+APP_ENV = "production"
+API_VERSION = "v1"

@@ -6,6 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   { ignores: ["dist", "coverage", "node_modules"] },
+  { files: ["**/*.{js,mjs}"], languageOptions: { ecmaVersion: 2022, globals: globals.node } },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

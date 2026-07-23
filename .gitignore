@@ -9,4 +9,5 @@ coverage/
 *.tsbuildinfo
 .wrangler/
 .mf/
+.dev.vars
 npm-debug.log*
