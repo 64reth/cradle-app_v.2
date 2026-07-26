@@ -117,7 +117,7 @@ export function Meals({ navigate, signOut }: { navigate: (view: AuthenticatedVie
 function MealPlanSlot({ slot, busy, onEdit }: { slot: RotationSlot; busy: boolean; onEdit: (slot: RotationSlot) => void }) {
   const away = slot.slotKind === "eating_out"; const mealName = away ? "Eating away" : slot.mealName || slot.customMealName || (slot.slotKind === "flexible" ? "Flexible" : "Choose a meal");
   const detail = away ? (slot.notes ? `Eating away — ${slot.notes}` : "We are away") : slot.overrideKind === "this_week" ? "Changed this week" : slot.overrideKind === "special_occasion" ? slot.specialOccasionTitle : "Tap to change";
-  return <button type="button" className="meal-plan-slot" disabled={busy} onClick={() => onEdit(slot)}><span><strong>{dayLabel(slot.dayOfWeek)}</strong><small>{slot.mealType}</small></span><span className="meal-plan-choice"><strong>{mealName}</strong><small>{detail}</small></span><CradleIcon name="edit" size="sm" decorative /></button>;
+  return <button type="button" className={`meal-plan-slot meal-slot-${slot.slotKind}`} disabled={busy} onClick={() => onEdit(slot)}><span><strong>{dayLabel(slot.dayOfWeek)}</strong><small>{slot.mealType}</small></span><span className="meal-plan-choice"><strong>{mealName}</strong><small>{detail}</small></span><CradleIcon name="edit" size="sm" decorative /></button>;
 }
 
 function MealEditor({ slot, suggestions, occasionDate, onOccasionDateChange, occasionSuggestions, busy, onClose, onSave, onQuickAction, onLoadOccasionSuggestions }: {

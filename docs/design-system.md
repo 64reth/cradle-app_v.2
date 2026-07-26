@@ -2,6 +2,10 @@
 
 Cradle uses mobile-first cute-brutalist tokens: cream paper, brighter sunflower, mint, sky, coral and violet surfaces; strong charcoal borders; rounded cards; chunky shadows; and visible keyboard focus. Colour has stable ownership: yellow means attention/current selection, green means success, blue means Today/Schedule information, purple means My Cradle/avatar identity, and coral means support.
 
+The source palette is declared in `src/styles/tokens.css`. Semantic aliases in the same file provide the shared meanings used by components: canvas and surfaces, primary and muted text, borders and shadows, actions, focus, module accents, selection, success, warning, error and progress. The aliases preserve the approved palette rather than introducing a second theme. `--colour-muted-ink` and `--colour-cream` are compatibility aliases for older feature selectors; feature CSS should use the semantic surface/text aliases directly.
+
+Module colours identify where the user is; semantic colours explain what is happening. A Together accent is not a paused routine, a primary action is not successful completion, and a warning is not an error. Focus uses a bold sky inner ring with an ink outer ring so it remains visible on Cradle's light pastel cards. Disabled controls use a readable disabled surface and text treatment rather than opacity alone. Cradle is playful by design. Household admin and chores are dull enough; colour, tactile cards and companion artwork should make the experience feel lighter without making the product childish or unclear.
+
 ## Product language
 
 Every screen reads as though it was written for a family around a kitchen table. The UI uses **Dashboard**, **Routines**, **Family**, **Schedule**, **Together**, **Suggestions**, **My Cradle**, **Today’s Mission**, **Today’s Moment**, **Household Schedule**, **Weekly Review**, **Meeting**, **Family Meeting**, **Leadership Meeting**, **Appointments**, and **Trips** consistently.
