@@ -107,7 +107,12 @@ describe("household onboarding", () => {
   });
   it("renders a safe waiting state for non-Owners", async () => { mockState("rooms", "adult", false); render(<App />); expect(await screen.findByText(/household lead is setting things up/i)).toBeInTheDocument(); });
   it("shows network retry", async () => { vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline")))); render(<App />); expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument(); });
-  it("opens the create form accessibly", async () => { vi.stubGlobal("fetch", vi.fn(() => response(401, {}))); render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Create Household" })); expect(screen.getByLabelText("Household name")).toBeInTheDocument(); });
+  it("opens provider-backed household creation without a PIN", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => response(401, {}))); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create Household" }));
+    expect(screen.getByLabelText("Household name")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/PIN/i)).not.toBeInTheDocument();
+  });
 
   it("creates a Room through the real frontend route and includes same-origin credentials", async () => {
     const fetch = vi.fn()
@@ -181,11 +186,22 @@ describe("household onboarding", () => {
 
   it("returns to Create Household when a development database reset invalidates the session", async () => {
     const runtime = "X-Cradle-Dev-Runtime-ID";
-    const fetch = vi.fn()
-      .mockImplementationOnce(() => response(200, session("leadership"), { [runtime]: "runtime-one" }))
-      .mockImplementationOnce(() => response(200, setup("leadership"), { [runtime]: "runtime-one" }))
-      .mockImplementationOnce(() => response(200, { ok: true, data: { step: "members" }, requestId: "leadership-ok" }, { [runtime]: "runtime-one" }))
-      .mockImplementationOnce(() => response(401, { ok: false, error: { code: "AUTHENTICATION_REQUIRED", message: "Please sign in to continue." }, requestId: "reset-session" }, { [runtime]: "runtime-one" }));
+    let sessionRequestCount = 0;
+    const fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/auth/session") {
+        sessionRequestCount += 1;
+        return sessionRequestCount === 1
+          ? response(200, session("leadership"), { [runtime]: "runtime-one" })
+          : response(401, { ok: false, error: { code: "AUTHENTICATION_REQUIRED", message: "Please sign in to continue." }, requestId: "reset-session" }, { [runtime]: "runtime-one" });
+      }
+      if (url === "/api/household/setup") return response(200, setup("leadership"), { [runtime]: "runtime-one" });
+      if (url === "/api/household/setup/leadership") {
+        return response(200, { ok: true, data: { step: "members" }, requestId: "leadership-ok" }, { [runtime]: "runtime-one" });
+      }
+      if (url === "/api/alpha/events") return response(202, { ok: true, data: {}, requestId: "diagnostic-event" });
+      throw new Error(`Unexpected ${url}`);
+    });
     vi.stubGlobal("fetch", fetch); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Confirm household leadership/i }));
     expect(await screen.findByText(/local development database has been reset/i)).toBeInTheDocument();

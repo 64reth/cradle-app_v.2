@@ -72,7 +72,7 @@ function PublicForm({ view, onDone, onBack, notice }: { view: Exclude<View, "hom
       onDone(); setBusy(false); return;
     }
     const endpoint = view === "create" ? "/api/auth/households" : "/api/auth/sign-in";
-    const body = view === "create" ? { householdName: values.householdName, displayName: values.displayName, pin: values.pin, pinConfirmation: values.pinConfirmation }
+    const body = view === "create" ? { householdName: values.householdName, displayName: values.displayName }
       : { householdReference: values.householdReference, profileReference: values.profileReference, pin: values.pin };
     try { await api(endpoint, jsonInit("POST", body)); onDone(); }
     catch (reason) { setError(failureMessage(reason)); }
@@ -84,10 +84,9 @@ function PublicForm({ view, onDone, onBack, notice }: { view: Exclude<View, "hom
       {view === "join" && <Field label="Private invite link or joining code" name="invitationCode" />}
       {view === "sign-in" && <><Field label="Household reference" name="householdReference" /><Field label="Family member reference" name="profileReference" /></>}
       {view === "create" && <Field label="Owner display name" name="displayName" />}
-      {view !== "join" && <Field label="PIN (4–12 digits)" name="pin" type="password" />}
-      {view === "create" && <Field label="Confirm PIN" name="pinConfirmation" type="password" />}
-      <ErrorMessage value={error} />{view === "sign-in" && <SupabaseAuthActions onComplete={onDone} />}<button className="primary" disabled={busy}>{busy ? "Working…" : labels[view]}</button>
-    </form></section>;
+      {view === "sign-in" && <Field label="PIN (4–12 digits)" name="pin" type="password" />}
+      <ErrorMessage value={error} /><button className="primary" disabled={busy}>{busy ? "Working…" : labels[view]}</button>
+    </form>{(view === "create" || view === "sign-in") && <SupabaseAuthActions onComplete={onDone} />}</section>;
 }
 
 function Progress({ step }: { step: Step }) {
@@ -306,12 +305,32 @@ export function App() {
     }
   }, [clearDevelopmentSession]);
   useEffect(() => {
-    if (!window.location.search.includes("code=")) return;
-    void completeSupabaseOAuth().then((completed) => {
-      if (completed) { window.history.replaceState({}, "", "/"); void load(); }
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "That sign-in could not be completed."));
+    const isOAuthCallback = window.location.search.includes("code=");
+    let cancelled = false;
+    if (isOAuthCallback) {
+      // Do not race the provider exchange with /api/auth/session. A fresh
+      // provider identity has no household session until it creates or joins
+      // a household, so the early 401 is expected but misleading.
+      setState("loading");
+      void completeSupabaseOAuth().then((result) => {
+        if (cancelled || !result) return;
+        window.history.replaceState({}, "", "/");
+        if (result.householdCount === 0) {
+          setDevelopmentResetNotice("Your account is ready. Create your household to continue.");
+          setView("create"); setState("public");
+        } else {
+          void load();
+        }
+      }).catch((reason) => {
+        if (cancelled) return;
+        setError(reason instanceof Error ? reason.message : "That sign-in could not be completed.");
+        setState(reason instanceof TransportError ? "network" : "problem");
+      });
+    } else {
+      void load();
+    }
+    return () => { cancelled = true; };
   }, [load]);
-  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const pop = () => setHouseholdView(viewFromPath(window.location.pathname));
     window.addEventListener("popstate", pop); return () => window.removeEventListener("popstate", pop);
