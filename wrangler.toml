@@ -27,7 +27,7 @@ APP_VERSION = "0.1.0"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "cradle-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "5884beb0-6992-4060-99ef-4efeb0589e32"
 migrations_dir = "migrations"
 
 [env.alpha]
@@ -37,7 +37,7 @@ name = "cradle-alpha"
 binding = "DB"
 database_name = "cradle-alpha-db"
 # Placeholder only. Replace with the real Alpha D1 UUID in Cloudflare.
-database_id = "00000000-0000-0000-0000-000000000001"
+database_id = "feabc3a3-269d-4aa9-abbf-2a20f67cb307"
 migrations_dir = "migrations"
 
 [env.alpha.vars]
