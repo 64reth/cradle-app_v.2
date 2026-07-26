@@ -3,6 +3,7 @@ import { api, failureMessage, jsonInit } from "./api";
 import { CradleIcon } from "./components/ui/CradleIcon";
 import { Navigation, type AuthenticatedView } from "./Dashboard";
 import { participantContext, type TogetherMoment } from "../shared/together";
+import { MotionCard, MotionPage } from "./motion";
 
 type TogetherData = { localDate: string; moments: TogetherMoment[]; traditions: Array<{ id: string; title: string; description: string; recurrence: string; isActive: number }> };
 
@@ -35,7 +36,7 @@ export function Together({ navigate, signOut }: { navigate: (view: Authenticated
     catch (reason) { setError(failureMessage(reason)); }
     finally { setBusy(false); }
   }
-  return <div className="dashboard-shell"><Navigation active="together" navigate={navigate} signOut={signOut} />
+  return <div className="dashboard-shell"><Navigation active="together" navigate={navigate} signOut={signOut} /><MotionPage motionKey="together" className="motion-page">
     <section className="calendar-hero together-hero dashboard-card"><div><p className="eyebrow"><CradleIcon name="family" size="sm" decorative /> Together</p><h1>Make a moment to look forward to.</h1><p>Optional invitations to connect, learn, play and make memories—never another chore list.</p></div></section>
     {error && <section className="dashboard-card local-error"><p className="error" role="alert">{error}</p><button className="primary" onClick={() => void load()}>Retry</button></section>}
     {notice && <p className="inline-success-chip" role="status">{notice}</p>}
@@ -50,12 +51,12 @@ export function Together({ navigate, signOut }: { navigate: (view: Authenticated
       </section>
       {memoryMoment && <section className="dashboard-card together-memory"><h2>What would you like to remember?</h2><form onSubmit={saveMemory}><label><span>Short note (optional)</span><textarea name="note" maxLength={1000} /></label><label><span>Would you do it again?</span><select name="wouldRepeat" defaultValue=""><option value="">Prefer not to say</option><option value="true">Yes</option><option value="false">Not this one</option></select></label><div className="row-actions"><button className="primary" disabled={busy}>Save memory</button><button type="button" onClick={() => setMemoryMoment(null)}>Not now</button></div></form></section>}
     </main>
-  </div>;
+  </MotionPage></div>;
 }
 
 function MomentCard({ moment, busy, onAction, compact = false }: { moment: TogetherMoment; busy: boolean; onAction: (moment: TogetherMoment, name: "accept" | "start" | "complete" | "skip" | "save" | "swap") => void; compact?: boolean }) {
   const closed = ["completed", "skipped", "swapped", "saved_for_later", "cancelled"].includes(moment.status);
-  return <article className={`together-moment-card ${compact ? "compact" : ""}`}><h2>{moment.title}</h2><p>{moment.description}</p><div className="together-meta"><span><CradleIcon name="family" size="sm" decorative /> {participantContext(moment.participants)}</span><span><CradleIcon name="time" size="sm" decorative /> {moment.durationMinutes} minutes</span><span>{moment.indoorOutdoor} · {moment.screenMode === "off_screen" ? "Off-screen" : "Shared screen"}</span></div><small>{moment.whySuggested || "A gentle invitation for your household."}</small>
+  return <MotionCard className="motion-card-shell" interactive><article className={`together-moment-card ${compact ? "compact" : ""}`}><h2>{moment.title}</h2><p>{moment.description}</p><div className="together-meta"><span><CradleIcon name="family" size="sm" decorative /> {participantContext(moment.participants)}</span><span><CradleIcon name="time" size="sm" decorative /> {moment.durationMinutes} minutes</span><span>{moment.indoorOutdoor} · {moment.screenMode === "off_screen" ? "Off-screen" : "Shared screen"}</span></div><small>{moment.whySuggested || "A gentle invitation for your household."}</small>
     {!closed && <div className="row-actions"><button className="primary" disabled={busy} onClick={() => onAction(moment, moment.status === "suggested" ? "accept" : moment.status === "accepted" ? "start" : "complete")}>{moment.status === "suggested" ? "Start Moment" : moment.status === "accepted" ? "Start Moment" : "Complete Moment"}</button><button disabled={busy} onClick={() => onAction(moment, "swap")}>Try another</button><button disabled={busy} onClick={() => onAction(moment, "save")}>Save for later</button></div>}
-    {moment.status === "completed" && <p className="inline-success-chip">Shared together. Add a memory if you’d like.</p>}{moment.status === "skipped" && <p className="soft-notice">Not for today. Your household can try another time.</p>}</article>;
+    {moment.status === "completed" && <p className="inline-success-chip">Shared together. Add a memory if you’d like.</p>}{moment.status === "skipped" && <p className="soft-notice">Not for today. Your household can try another time.</p>}</article></MotionCard>;
 }

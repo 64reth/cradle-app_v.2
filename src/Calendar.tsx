@@ -7,6 +7,7 @@ import { api, failureMessage, jsonInit } from "./api";
 import { Navigation, type AuthenticatedView, type DashboardData, type DashboardMember } from "./Dashboard";
 import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
+import { MotionDialog, MotionPage } from "./motion";
 
 type CalendarMember = Pick<DashboardMember, "id" | "displayName" | "role" | "ageGroup" | "lifecycleState">;
 type CalendarEvent = {
@@ -134,6 +135,7 @@ export function HouseholdCalendar({ dashboard, navigate, signOut, onDashboardCha
   const visibleTypes = HOUSEHOLD_EVENT_TYPES.filter(({ value }) =>
     data?.canCreateLeadership || (value !== "leadership_meeting" && value !== "weekly_review"));
   return <div className="dashboard-shell"><Navigation active="calendar" navigate={navigate} signOut={signOut} />
+    <MotionPage motionKey="schedule" className="motion-page">
     <section className="calendar-hero"><div><p className="eyebrow"><CradleIcon name="calendar" size="sm" decorative /> Dashboard → Schedule</p><h1>Household Schedule</h1>
       <p>Keep meetings, appointments, trips, reminders and shared plans in one calm place.</p></div>
       <div className="row-actions">{data?.canCreate && <button className="primary" onClick={openCreate}><CradleIcon name="add" size="sm" decorative /> Create event</button>}
@@ -161,7 +163,7 @@ export function HouseholdCalendar({ dashboard, navigate, signOut, onDashboardCha
           <button disabled={busy} onClick={() => void cancel(event)}>Cancel event</button>}
       </article>)}
     </section>
-    {creating && <section ref={dialogRef} className="personal-sheet calendar-sheet" role="dialog" aria-modal="true" aria-labelledby="calendar-create-title">
+    {creating && <MotionDialog ref={dialogRef} className="personal-sheet calendar-sheet" role="dialog" aria-modal="true" aria-labelledby="calendar-create-title">
       <div><div><p className="eyebrow">Household Schedule</p><h2 id="calendar-create-title">Create an event</h2></div>
         <button onClick={() => setCreating(false)} disabled={busy} aria-label="Close"><CradleIcon name="close" decorative /></button></div>
       <form onSubmit={create}>
@@ -190,6 +192,6 @@ export function HouseholdCalendar({ dashboard, navigate, signOut, onDashboardCha
           {busy ? "Saving…" : savedEvent ? "Event saved" : "Add to household schedule"}</button>
           <button type="button" disabled={busy} onClick={() => setCreating(false)}><CradleIcon name="close" size="sm" decorative /> Cancel</button></div>
       </form>
-    </section>}
-  </div>;
+    </MotionDialog>}
+    </MotionPage></div>;
 }

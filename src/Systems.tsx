@@ -8,6 +8,7 @@ import {
 import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
 import { getRoomIconName } from "./iconMappings";
+import { MotionPage } from "./motion";
 
 type LibraryData = { routines: RoutineSummary[]; members: DashboardMember[]; canManage: boolean };
 type RoutineDetail = {
@@ -129,15 +130,16 @@ export function SystemsLibrary({ navigate, signOut, addRoutine }: {
     catch (reason) { setError(failureMessage(reason)); }
   }
   if (editing && data) return <div className="dashboard-shell"><Navigation active="systems" navigate={navigate} signOut={signOut} />
-    <RoutineEditor routine={editing} members={data.members} canManage={data.canManage}
+    <MotionPage motionKey={`routine-${editing.id}`} className="motion-page"><RoutineEditor routine={editing} members={data.members} canManage={data.canManage}
       close={() => setEditing(null)} saved={async (routine) => { setEditing(routine); return load(filter); }}
-      removed={async () => { setEditing(null); return load(filter); }} /></div>;
+      removed={async () => { setEditing(null); return load(filter); }} /></MotionPage></div>;
   const grouped = new Map<string, RoutineSummary[]>();
   for (const routine of data?.routines || []) {
     const label = routine.roomName || routine.petName || "Whole household";
     grouped.set(label, [...(grouped.get(label) || []), routine]);
   }
   return <div className="dashboard-shell"><Navigation active="systems" navigate={navigate} signOut={signOut} />
+    <MotionPage motionKey="systems" className="motion-page">
     <section className="routine-library-hero"><div><p className="eyebrow">The way your home runs</p><h1>Routines</h1>
       <p>Cradle has made a sensible first draft from your Rooms and Pets. Review it, adjust it, or add something unique to your family.</p></div>
       {data?.canManage && <button className="primary" onClick={addRoutine}><CradleIcon name="add" size="sm" decorative /> Add a custom routine</button>}</section>
@@ -159,5 +161,5 @@ export function SystemsLibrary({ navigate, signOut, addRoutine }: {
           <button onClick={() => void edit(routine.id)}>{data?.canManage && routine.status !== "archived" ? "Edit" : "View"}</button>
         </article>)}</div></section>)}
     </section>
-  </div>;
+    </MotionPage></div>;
 }

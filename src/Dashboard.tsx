@@ -11,6 +11,7 @@ import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
 import type { TogetherMoment } from "../shared/together";
 import { participantContext } from "../shared/together";
+import { AnimatePresence, MotionButtonFeedback, MotionList, MotionListItem, MotionPage } from "./motion";
 
 export type AuthenticatedView = "dashboard" | "systems" | "calendar" | "me" | "meals" | "together";
 export type DashboardMember = {
@@ -433,12 +434,12 @@ export function Dashboard({ data, setData, navigate, signOut, startSetup = false
   const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
   const familyName = /\bfamily$/i.test(data.household.name.trim())
     ? data.household.name.trim() : `${data.household.name.trim()} Family`;
-  if (familyOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
+  if (familyOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} /><MotionPage motionKey="family" className="motion-page">
     <FamilyPanel dashboard={data} initialMemberId={familyMemberToManage}
-      onClose={() => { setFamilyOpen(false); setFamilyMemberToManage(undefined); }} onChanged={setData} /></div>;
-  if (setupOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
-    <RoutineSetup dashboard={data} onClose={() => setSetupOpen(false)} onApplied={(next) => { setData(next); setSetupOpen(false); }} /></div>;
-  return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
+      onClose={() => { setFamilyOpen(false); setFamilyMemberToManage(undefined); }} onChanged={setData} /></MotionPage></div>;
+  if (setupOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} /><MotionPage motionKey="routine-setup" className="motion-page">
+    <RoutineSetup dashboard={data} onClose={() => setSetupOpen(false)} onApplied={(next) => { setData(next); setSetupOpen(false); }} /></MotionPage></div>;
+  return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} /><MotionPage motionKey="dashboard" className="motion-page">
     <section className="dashboard-greeting"><div>
       <h1>{greeting} {familyName}</h1><p>Signed in as {data.currentUser.displayName}</p></div>
       <div className="date-card" aria-label={`${weekday}, ${calendarDate}, week ${isoWeek(data.currentDate)}`}>
@@ -469,24 +470,24 @@ export function Dashboard({ data, setData, navigate, signOut, startSetup = false
           : data.activeRoutineCount
             ? "Today’s household missions are complete."
           : "Choose a few routines so Cradle understands how your home works."}</p>
-        {!!data.todayMissions?.length && <div className="mission-list" aria-label="Today’s household missions">
-          {data.todayMissions.map((mission) => {
+        {!!data.todayMissions?.length && <MotionList className="mission-list" aria-label="Today’s household missions">
+          <AnimatePresence initial={false}>{data.todayMissions.map((mission) => {
             const incompleteParticipants = mission.participants.filter(({ status }) => status !== "complete");
             const currentParticipant = mission.participants.find(({ memberId }) => memberId === data.currentUser.id);
             const canOverride = data.currentUser.accessLevel === "household_admin" && incompleteParticipants.some(({ memberId, participantKind }) =>
               participantKind === "required" && data.members.find((member) => member.id === memberId)?.accessLevel === "managed_member");
             const canComplete = Boolean(currentParticipant && currentParticipant.status !== "complete") || canOverride;
-            return <article className={`mission-row ${mission.state === "complete" ? "complete" : ""}`} key={mission.id}>
+            return <MotionListItem key={mission.id}><article className={`mission-row ${mission.state === "complete" ? "complete" : ""}`}>
               <div className="mission-row-details"><strong><CradleIcon name="mission" size="sm" decorative /> {mission.title}</strong>
                 <small>{[mission.roomName || mission.petName, mission.duePeriod && mission.duePeriod[0].toUpperCase() + mission.duePeriod.slice(1)].filter(Boolean).join(" · ")}</small>
                 <span className="mission-assignees">{mission.participants.length ? `For ${mission.participants.map(({ memberName }) => memberName).join(", ")}` : "Unassigned"}</span></div>
               <div className="mission-row-actions">{mission.state === "complete" ? <span className="task-state complete"><CradleIcon name="complete" size="sm" decorative /> Complete</span>
-                : canComplete ? <button className="primary" disabled={missionBusy === mission.id} onClick={() => void completeMission(mission)}>{missionBusy === mission.id ? "Saving…" : "Sign off"}</button>
+                : canComplete ? <MotionButtonFeedback className="primary" disabled={missionBusy === mission.id} onClick={() => void completeMission(mission)}>{missionBusy === mission.id ? "Saving…" : "Sign off"}</MotionButtonFeedback>
                 : <span className="task-state">{mission.state === "waiting_for_team" ? "Waiting for team" : "Assigned"}</span>}
                 {currentParticipant && mission.state !== "complete" && <button className="mission-help-button" onClick={() => navigate("me")}><CradleIcon name="help" size="sm" decorative /> Need a hand?</button>}</div>
-            </article>;
-          })}
-        </div>}
+            </article></MotionListItem>;
+          })}</AnimatePresence>
+        </MotionList>}
         {missionError && <p className="error" role="alert">{missionError}</p>}
         {data.currentUser.role !== "child" && <button onClick={() => navigate("systems")}><CradleIcon name="routine" size="sm" decorative /> Review routines</button>}
       </section>
@@ -547,7 +548,7 @@ export function Dashboard({ data, setData, navigate, signOut, startSetup = false
             setFocusedMember(null); setFamilyMemberToManage(focusedMember.id); setFamilyOpen(true);
           }}>Manage family member</button></> : null}
         <button onClick={() => setFocusedMember(null)}>Done</button></div></section>}
-  </div>;
+  </MotionPage></div>;
 }
 
 function TodayMomentCard({ navigate, initialMoment }: { navigate: (view: AuthenticatedView) => void; initialMoment: TogetherMoment | null }) {

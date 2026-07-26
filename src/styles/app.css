@@ -170,6 +170,7 @@ textarea { min-height: 7rem; resize: vertical; }
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: stretch; gap: 1.25rem; }
 .dashboard-card { display: grid; min-width: 0; gap: 1rem; padding: clamp(1.25rem, 3vw, 2rem); border: 2px solid var(--colour-ink); border-radius: 22px;
   background: white; box-shadow: 0 5px 0 var(--colour-ink); }
+.motion-page, .motion-card-shell { min-width: 0; }
 .dashboard-card h2 { font-size: clamp(1.5rem, 3vw, 2.2rem); letter-spacing: -.035em; }
 .dashboard-card .card-heading { min-width: 0; }
 .dashboard-card .card-heading > div { min-width: 0; }

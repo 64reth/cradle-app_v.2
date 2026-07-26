@@ -8,6 +8,7 @@ import type { DashboardData } from "./Dashboard";
 import { Navigation, type AuthenticatedView } from "./Dashboard";
 import { taskStateLabel, type RoutineAssignmentMode, type TaskState } from "../shared/assignments";
 import { CradleIcon } from "./components/ui/CradleIcon";
+import { MotionPage } from "./motion";
 import { getTaskIconName } from "./iconMappings";
 import {
   INTEREST_CATEGORIES, INTEREST_CATEGORY_LABELS, INTEREST_LEVEL_LABELS, INTEREST_PARTICIPATION_LABELS,
@@ -202,7 +203,7 @@ export function PersonalArea({ dashboard, navigate, signOut, startSuggestion = f
   const viewedMemberId = data?.viewedMemberId || data?.member.id;
   const canEditInterests = Boolean(data && (viewedMemberId === dashboard.currentUser.id ||
     (dashboard.currentUser.role === "owner" || dashboard.currentUser.role === "parent_admin") && data.member.accessLevel === "managed_member"));
-  return <div className="dashboard-shell"><Navigation active="me" navigate={navigate} signOut={signOut} />
+  return <div className="dashboard-shell"><Navigation active="me" navigate={navigate} signOut={signOut} /><MotionPage motionKey={`me-${viewedMemberId || dashboard.currentUser.id}`} className="motion-page">
     <section className="personal-hero"><div><p className="eyebrow">Dashboard → My Cradle</p><div className="personal-title-row"><h1>My Cradle</h1>
       {notice && <span className="inline-success-chip" role="status">{notice}</span>}</div>
       <p>Your details, your cat and the things you want the household to notice.</p></div>
@@ -331,5 +332,5 @@ export function PersonalArea({ dashboard, navigate, signOut, startSuggestion = f
         <label><span>Note (optional)</span><textarea name="note" defaultValue={interestEditing?.note || ""} placeholder="Anything Cradle should remember" /></label>
         <div className="row-actions"><button className="primary">Save interest</button>{interestEditing && <button type="button" onClick={() => void archiveInterest(interestEditing)}>Archive interest</button>}<button type="button" onClick={closeEditor}>Cancel</button></div></form>
     </section>}
-  </div>;
+  </MotionPage></div>;
 }
