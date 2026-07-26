@@ -1,6 +1,12 @@
 name = "cradle"
 compatibility_date = "2026-07-23"
-pages_build_output_dir = "dist"
+main = "functions/worker.ts"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/health"]
 
 [[d1_databases]]
 binding = "DB"
@@ -11,7 +17,30 @@ migrations_dir = "migrations"
 [vars]
 APP_ENV = "development"
 API_VERSION = "v1"
+APP_VERSION = "0.1.0"
 
 [env.production.vars]
 APP_ENV = "production"
 API_VERSION = "v1"
+APP_VERSION = "0.1.0"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "cradle-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[env.alpha]
+name = "cradle-alpha"
+
+[[env.alpha.d1_databases]]
+binding = "DB"
+database_name = "cradle-alpha-db"
+# Placeholder only. Replace with the real Alpha D1 UUID in Cloudflare.
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
+
+[env.alpha.vars]
+APP_ENV = "alpha"
+API_VERSION = "v1"
+APP_VERSION = "0.1.0"
