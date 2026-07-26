@@ -9,12 +9,14 @@ import {
   displayRoutineName, isRoutineFrequency, routineTemplate, type RoomType, type RoutineFrequency
 } from "../../../../shared/routines";
 import type { PetType } from "../../../../shared/pets";
+import { isRoutineAssignmentMode, type RoutineAssignmentMode } from "../../../../shared/assignments";
+import { generateTodayTasks } from "../../tasks";
 
 type Context = { request: Request; env: CradleEnv };
 type Selection = {
   enabled: boolean; templateKey: string | null; clientKey: string | null;
   roomId: string | null; petId: string | null; frequency: RoutineFrequency;
-  ownerMemberId: string; rotationMemberIds: string[]; rotationEnabled: boolean;
+  assignmentMode: RoutineAssignmentMode; assignedMemberId: string | null; participantMemberIds: string[];
   customisedName: string | null; note: string | null; customFrequencyNote: string | null;
 };
 type Existing = {
@@ -25,7 +27,7 @@ type Existing = {
 const optionalId = (row: JsonRecord, key: string): string | null => {
   const value = row[key];
   if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string" || value.length > 100) throw validationError("Please check the routine selections.", { [key]: "Choose a valid record" });
+  if (typeof value !== "string" || value.length > 100) throw validationError("Please check the routine selections.", { [key]: "Choose a valid option" });
   return value;
 };
 const selectedText = (row: JsonRecord, key: string, max: number): string | null => optionalText(row, key, max);
@@ -42,21 +44,34 @@ function parseSelection(value: unknown, index: number): Selection {
   }
   const frequency = row.frequency;
   if (!isRoutineFrequency(frequency)) throw validationError("Please check the routine selections.", { frequency: "Choose how often this happens" });
-  const ownerMemberId = optionalId(row, "ownerMemberId");
-  if (!ownerMemberId) throw validationError("Please check the routine selections.", { ownerMemberId: "Choose who usually handles this" });
-  const rotation = row.rotationMemberIds === undefined ? [] : row.rotationMemberIds;
-  if (!Array.isArray(rotation) || rotation.some((id) => typeof id !== "string") || new Set(rotation).size !== rotation.length) {
-    throw validationError("Please check the routine selections.", { rotationMemberIds: "Choose each rotating person once" });
+  const assignmentMode = row.assignmentMode === undefined
+    ? row.rotationEnabled === true ? "rotation" : "one_person" : row.assignmentMode;
+  if (!isRoutineAssignmentMode(assignmentMode)) {
+    throw validationError("Please check the routine selections.", { assignmentMode: "Choose how this Routine is shared" });
   }
-  const rotationEnabled = row.rotationEnabled === true;
-  if (rotationEnabled && rotation.length < 2) {
-    throw validationError("Please check the routine selections.", { rotationMemberIds: "Choose at least two people to rotate" });
+  const assignedMemberId = optionalId(row, "assignedMemberId") || optionalId(row, "ownerMemberId");
+  const participants = row.participantMemberIds === undefined
+    ? row.rotationMemberIds === undefined ? [] : row.rotationMemberIds : row.participantMemberIds;
+  if (!Array.isArray(participants) || participants.some((id) => typeof id !== "string") ||
+    new Set(participants).size !== participants.length) {
+    throw validationError("Please check the routine selections.", { participantMemberIds: "Choose each participant once" });
+  }
+  if (assignmentMode === "one_person" && !assignedMemberId) {
+    throw validationError("Please check the routine selections.", { assignedMemberId: "Choose one Family member" });
+  }
+  if (assignmentMode === "rotation" && participants.length < 1) {
+    throw validationError("Please check the routine selections.", { participantMemberIds: "Choose at least one Rotation participant" });
+  }
+  if (assignmentMode === "shared_team" && participants.length < 2) {
+    throw validationError("Please check the routine selections.", { participantMemberIds: "Choose at least two Shared-team participants" });
   }
   const roomId = optionalId(row, "roomId"); const petId = optionalId(row, "petId");
   if (roomId && petId) throw validationError("Please check the routine selections.", { selections: "Choose a Room or a Pet, not both" });
   return {
-    enabled: row.enabled, templateKey, clientKey, roomId, petId, frequency, ownerMemberId,
-    rotationMemberIds: rotation as string[], rotationEnabled,
+    enabled: row.enabled, templateKey, clientKey, roomId, petId, frequency, assignmentMode,
+    assignedMemberId: assignmentMode === "one_person" ? assignedMemberId : null,
+    participantMemberIds: (assignmentMode === "rotation" || assignmentMode === "shared_team")
+      ? participants as string[] : [],
     customisedName: selectedText(row, "customisedName", 100), note: selectedText(row, "note", 1000),
     customFrequencyNote: selectedText(row, "customFrequencyNote", 300)
   };
@@ -80,7 +95,8 @@ export async function onRequestPost({ request, env }: Context) {
         .bind(identity.householdId).all<{ id: string; roomType: RoomType }>(),
       db.prepare("SELECT id, name, pet_type AS petType FROM pets WHERE household_id = ? AND is_active = 1")
         .bind(identity.householdId).all<{ id: string; name: string; petType: PetType }>(),
-      db.prepare("SELECT id, role FROM members WHERE household_id = ? AND is_active = 1")
+      db.prepare(`SELECT id, role FROM members WHERE household_id = ? AND is_active = 1
+        AND lifecycle_state NOT IN ('left','suspended')`)
         .bind(identity.householdId).all<{ id: string; role: string }>(),
       db.prepare(`SELECT id, name, source_template_key AS sourceTemplateKey, client_key AS clientKey,
         room_id AS roomId, pet_id AS petId, status FROM household_systems
@@ -90,7 +106,7 @@ export async function onRequestPost({ request, env }: Context) {
     ]);
     const rooms = new Map(roomsResult.results.map((room) => [room.id, room]));
     const pets = new Map(petsResult.results.map((pet) => [pet.id, pet]));
-    const eligibleMembers = new Set(membersResult.results.filter(({ role }) => role !== "child").map(({ id }) => id));
+    const eligibleMembers = new Set(membersResult.results.map(({ id }) => id));
     const existingByKey = new Map(existingResult.results.map((system) => [
       system.sourceTemplateKey
         ? `${system.sourceTemplateKey}|${system.roomId || ""}|${system.petId || ""}`
@@ -100,9 +116,9 @@ export async function onRequestPost({ request, env }: Context) {
     const statements: D1PreparedStatement[] = []; const now = new Date().toISOString();
     let nextOrder = orderResult?.value ?? 0;
     for (const selection of selections) {
-      if (!eligibleMembers.has(selection.ownerMemberId) ||
-        selection.rotationMemberIds.some((memberId) => !eligibleMembers.has(memberId))) {
-        throw validationError("Please check the routine selections.", { ownerMemberId: "Choose active eligible Members from this household" });
+      if ((selection.assignedMemberId && !eligibleMembers.has(selection.assignedMemberId)) ||
+        selection.participantMemberIds.some((memberId) => !eligibleMembers.has(memberId))) {
+        throw validationError("Please check the routine selections.", { assignedMemberId: "Choose someone active in this household" });
       }
       const room = selection.roomId ? rooms.get(selection.roomId) : null;
       const pet = selection.petId ? pets.get(selection.petId) : null;
@@ -133,47 +149,68 @@ export async function onRequestPost({ request, env }: Context) {
       const canonicalName = template ? displayRoutineName(template, pet?.name) : selection.customisedName as string;
       const name = selection.customisedName || existing?.name || canonicalName;
       if (existing) {
+        const legacyOwner = selection.assignedMemberId || selection.participantMemberIds[0] ||
+          membersResult.results.find(({ role }) => role === "owner")?.id || membersResult.results[0].id;
         statements.push(db.prepare(`UPDATE household_systems SET name = ?, owner_member_id = ?, status = 'active',
           frequency_key = ?, custom_frequency_note = ?, rotation_enabled = ?, notes = ?, template_customised = ?, updated_at = ?
           WHERE household_id = ? AND id = ? AND status != 'archived'`)
-          .bind(name, selection.ownerMemberId, selection.frequency, selection.customFrequencyNote,
-            selection.rotationEnabled ? 1 : 0, selection.note,
+          .bind(name, legacyOwner, selection.frequency, selection.customFrequencyNote,
+            selection.assignmentMode === "rotation" ? 1 : 0, selection.note,
             selection.customisedName && selection.customisedName !== canonicalName ? 1 : 0,
             now, identity.householdId, existing.id));
+        statements.push(db.prepare(`UPDATE routine_assignments SET assignment_mode = ?, assigned_member_id = ?,
+          rotation_next_index = CASE WHEN ? = 'rotation' THEN rotation_next_index % ? ELSE 0 END,
+          updated_at = ? WHERE household_id = ? AND system_id = ?`)
+          .bind(selection.assignmentMode, selection.assignedMemberId, selection.assignmentMode,
+            Math.max(1, selection.participantMemberIds.length), now, identity.householdId, existing.id));
+        statements.push(db.prepare("DELETE FROM routine_assignment_participants WHERE household_id = ? AND system_id = ?")
+          .bind(identity.householdId, existing.id));
         statements.push(db.prepare("DELETE FROM household_system_participants WHERE household_id = ? AND system_id = ?")
           .bind(identity.householdId, existing.id));
-        for (const memberId of selection.rotationEnabled ? selection.rotationMemberIds : []) {
+        selection.participantMemberIds.forEach((memberId, participantOrder) => {
+          statements.push(db.prepare(`INSERT INTO routine_assignment_participants
+            (household_id, system_id, member_id, participant_order, created_at) VALUES (?, ?, ?, ?, ?)`)
+            .bind(identity.householdId, existing.id, memberId, participantOrder, now));
           statements.push(db.prepare(`INSERT INTO household_system_participants
             (household_id, system_id, member_id, created_at) VALUES (?, ?, ?, ?)`)
             .bind(identity.householdId, existing.id, memberId, now));
-        }
+        });
         continue;
       }
       const id = crypto.randomUUID();
       const purpose = template ? template.purpose.replace("{pet}", pet?.name || "your pet") : `Keep ${name} part of the household routine.`;
       const definition = template ? template.definitionOfDone.replace("{pet}", pet?.name || "The pet") : `${name} is finished.`;
+      const legacyOwner = selection.assignedMemberId || selection.participantMemberIds[0] ||
+        membersResult.results.find(({ role }) => role === "owner")?.id || membersResult.results[0].id;
       statements.push(db.prepare(`INSERT INTO household_systems
         (id, household_id, name, purpose, room_id, pet_id, owner_member_id, status, frequency_key,
           custom_frequency_note, rotation_enabled, estimated_minutes, definition_of_done, notes, display_order,
           source_kind, source_template_key, source_template_version, template_customised, client_key,
           created_at, updated_at, archived_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`)
-        .bind(id, identity.householdId, name, purpose, selection.roomId, selection.petId, selection.ownerMemberId,
-          selection.frequency, selection.customFrequencyNote, selection.rotationEnabled ? 1 : 0, template?.estimatedMinutes || 15, definition,
+        .bind(id, identity.householdId, name, purpose, selection.roomId, selection.petId, legacyOwner,
+          selection.frequency, selection.customFrequencyNote, selection.assignmentMode === "rotation" ? 1 : 0, template?.estimatedMinutes || 15, definition,
           selection.note, nextOrder++, template ? "template" : "custom", template?.key || null,
           template?.version || null, selection.customisedName && selection.customisedName !== canonicalName ? 1 : 0,
           template ? null : selection.clientKey, now, now));
+      statements.push(db.prepare(`INSERT INTO routine_assignments
+        (household_id, system_id, assignment_mode, assigned_member_id, rotation_next_index,
+          previous_assignee_id, created_at, updated_at) VALUES (?, ?, ?, ?, 0, NULL, ?, ?)`)
+        .bind(identity.householdId, id, selection.assignmentMode, selection.assignedMemberId, now, now));
       const steps = template?.steps || [name];
       steps.forEach((label, displayOrder) => {
         statements.push(db.prepare(`INSERT INTO household_system_steps
           (id, household_id, system_id, label, display_order, is_required, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`).bind(crypto.randomUUID(), identity.householdId, id, label, displayOrder, now, now));
       });
-      for (const memberId of selection.rotationEnabled ? selection.rotationMemberIds : []) {
+      selection.participantMemberIds.forEach((memberId, participantOrder) => {
+        statements.push(db.prepare(`INSERT INTO routine_assignment_participants
+          (household_id, system_id, member_id, participant_order, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(identity.householdId, id, memberId, participantOrder, now));
         statements.push(db.prepare(`INSERT INTO household_system_participants
           (household_id, system_id, member_id, created_at) VALUES (?, ?, ?, ?)`)
           .bind(identity.householdId, id, memberId, now));
-      }
+      });
     }
     try {
       if (statements.length) await db.batch(statements);
@@ -181,6 +218,7 @@ export async function onRequestPost({ request, env }: Context) {
       if (String(error).includes("UNIQUE constraint")) throw conflictError("A routine changed while this setup was being saved. Refresh and try again.");
       throw error;
     }
+    await generateTodayTasks(db, identity.householdId, identity.householdTimezone || "UTC");
     return success(await dashboardData(db, identity), requestId);
   });
 }

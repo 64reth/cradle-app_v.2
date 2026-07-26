@@ -1,5 +1,6 @@
 import { ApiError, authorizationError, validationError } from "./http";
 import type { CradleEnv, JsonRecord } from "./types";
+import type { MemberAccessLevel, MemberAgeBand } from "../../shared/members";
 
 export const SESSION_COOKIE = "cradle_session";
 export const PIN_ITERATIONS = 210_000;
@@ -9,13 +10,17 @@ const encoder = new TextEncoder();
 export type Role = "owner" | "parent_admin" | "adult" | "child";
 export type Identity = {
   sessionId: string;
+  accountId?: string | null;
   householdId: string;
   householdName: string;
   householdReference: string;
+  householdTimezone?: string;
   memberId: string;
   displayName: string;
   profileReference: string;
   role: Role;
+  accessLevel?: MemberAccessLevel;
+  ageBand?: MemberAgeBand;
   expiresAt: string;
   setupStatus: "incomplete" | "complete";
   setupStep: "leadership" | "members" | "rooms" | "pets" | "companion" | "review" | "complete";
@@ -90,14 +95,18 @@ function cookieValue(request: Request): string | null {
   return match ? match[1] : null;
 }
 
-export async function createSession(db: D1Database, householdId: string, memberId: string): Promise<{ token: string; expiresAt: string }> {
+export async function createSession(
+  db: D1Database, householdId: string, memberId: string, accountId: string | null = null
+): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken();
   const tokenHash = await sha256(token);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE * 1000).toISOString();
   await db.prepare(
-    "INSERT INTO sessions (id, household_id, member_id, token_hash, expires_at, created_at, updated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)"
-  ).bind(crypto.randomUUID(), householdId, memberId, tokenHash, expiresAt, now.toISOString(), now.toISOString()).run();
+    `INSERT INTO sessions
+      (id, household_id, member_id, token_hash, expires_at, created_at, updated_at, revoked_at, account_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`
+  ).bind(crypto.randomUUID(), householdId, memberId, tokenHash, expiresAt, now.toISOString(), now.toISOString(), accountId).run();
   return { token, expiresAt };
 }
 
@@ -106,15 +115,17 @@ export async function authenticate(request: Request, db: D1Database): Promise<Id
   if (!token) throw new ApiError(401, "AUTHENTICATION_REQUIRED", "Please sign in to continue.");
   const tokenHash = await sha256(token);
   const row = await db.prepare(`
-    SELECT s.id AS sessionId, s.household_id AS householdId, s.member_id AS memberId,
+    SELECT s.id AS sessionId, s.account_id AS accountId, s.household_id AS householdId, s.member_id AS memberId,
       s.expires_at AS expiresAt, h.name AS householdName, h.lookup_reference AS householdReference,
+      h.timezone AS householdTimezone,
       m.display_name AS displayName, m.profile_reference AS profileReference, m.role AS role,
+      m.access_level AS accessLevel, m.age_band AS ageBand,
       h.setup_status AS setupStatus, h.setup_step AS setupStep
     FROM sessions s
     JOIN households h ON h.id = s.household_id
     JOIN members m ON m.household_id = s.household_id AND m.id = s.member_id
     WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
-      AND m.is_active = 1
+      AND m.is_active = 1 AND m.lifecycle_state NOT IN ('suspended', 'left')
     LIMIT 1
   `).bind(tokenHash, new Date().toISOString()).first<Identity>();
   if (!row) throw new ApiError(401, "AUTHENTICATION_REQUIRED", "Please sign in to continue.");
@@ -122,8 +133,12 @@ export async function authenticate(request: Request, db: D1Database): Promise<Id
 }
 
 export function requireInvitationPermission(identity: Identity): void {
-  if (identity.role !== "owner" && identity.role !== "parent_admin") throw authorizationError();
+  if (identityAccessLevel(identity) !== "household_admin") throw authorizationError();
 }
+
+export const identityAccessLevel = (identity: Pick<Identity, "accessLevel" | "role">): MemberAccessLevel =>
+  identity.accessLevel || (identity.role === "owner" || identity.role === "parent_admin"
+    ? "household_admin" : identity.role === "adult" ? "household_member" : "managed_member");
 
 export function invitedRole(body: JsonRecord): Exclude<Role, "owner"> {
   const role = body.role;

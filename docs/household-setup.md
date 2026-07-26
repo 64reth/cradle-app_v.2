@@ -2,40 +2,34 @@
 
 ## State machine
 
-The server persists and validates this sequence:
+The server persists:
 
-`leadership → members → rooms → pets → companion → review → complete`
+`leadership → members → companion → rooms → pets → review → complete`
 
-A newly created or existing pre-migration household starts at leadership. Refresh, reauthentication, and browser restart resolve the persisted step through the authenticated session and setup API. Only the active Owner may change incomplete initial setup. Other members see a waiting state.
+`companion` is the immutable internal state value for the real Owner’s **Your cat** step. It no longer refers to a household guide or synthetic identity.
+
+Only the Owner changes incomplete initial setup. Refresh, sign-in, and browser restart resolve the persisted step. Other family members see a useful waiting state.
 
 ## Stages
 
-1. **Leadership** confirms the initial Owner as household lead. One leader is sufficient.
-2. **Members** reuses one-use invitations and may be acknowledged without creating or redeeming one.
-3. **Rooms** records a friendly name and canonical type so Cradle can infer useful routine defaults. At least one active Room is required.
-4. **Pets** optionally records animals who may need future care. A household may continue with none.
-5. **Companion** creates the shared cat avatar from the production layered sprite sheets. Defaults are valid and editable.
-6. **Review** shows the household, lead, members, ordered Rooms, Pets when present, and Companion.
-7. **Complete** is an Owner-only server action requiring leadership confirmation, membership acknowledgement, an active Owner, at least one active Room, and a valid active Companion.
+1. **Leadership** confirms the Owner.
+2. **Family** asks separately what the person can manage and their age group. Access is Household admin, Household member, or Managed member. Age is Adult, Teen, Child, or Young child. There is no “place in household” or “Dependent” age option.
+3. **Your cat** creates the Owner’s member-owned avatar with direct palette swatches.
+4. **Rooms** records at least one named, typed Room, optionally records who uses it, and creates Cradle’s retry-safe balanced routine first draft when the stage is completed.
+5. **Pets** optionally records animals for future care planning and extends the first draft.
+6. **Review** shows leadership, the Owner’s cat, Family, Rooms, and Pets when present.
+7. **Complete** requires confirmed leadership, reviewed Family, an active Owner with a saved avatar, and at least one active Room.
 
-Pets are household participants for care planning but never authenticated users or roles. Future Systems may reference feeding, fresh water, walking, litter or enclosure cleaning, medication, grooming, vet appointments, and supply checks.
+Pets are optional care-planning records, not users or roles. Cat avatars belong to real family members, never create another identity, and are created during each person’s first-run experience. They remain editable in My Cradle. Completing setup materialises today’s due task instances so the Dashboard opens useful rather than empty.
 
-## Relationship to the operating loop
+## Compatibility
 
-Rooms and Pets provide the context for Dashboard recommendations. On completion Cradle routes directly to `/dashboard`, where the household chooses routines without entering a second technical setup product.
-
-Cradle then creates internal System definitions with ordered steps and responsibility. Scheduling, recurrence expansion, actual delegation/rotation, task/execution instances, pet-care execution, Companion reactions, actionable Today’s Mission, and Weekly Review are explicitly deferred.
+Migrations `0007` and `0008` are additive. The former deactivates only legacy synthetic guide rows. The latter backfills canonical access, age, and assignment ownership without deleting or replacing a family member, account, invitation, avatar, Pet, Room, Routine, assignment, Schedule entry, or session.
 
 ## Local review reliability
 
-The application does not register a service worker or PWA cache, so local API mutations cannot be served by stale browser caches. API responses use `Cache-Control: no-store`. During review, keep `npm run dev:pages` attached and confirm its terminal reports `Ready on http://localhost:8788`; if the terminal exits, restart it rather than relying on an orphaned `workerd` process.
+No service worker is registered, and API responses use `Cache-Control: no-store`. Keep `npm run dev:pages` attached and verify that its `workerd` child owns port 8788 before review. Do not treat an arbitrary listener as authoritative.
 
-After a local D1 reset, an already-open document detects the invalid development session, clears it, and returns to Create Household with an explanation. When the runtime itself changed, the page instead shows the explicit development-restart screen and Reload action. An already-open JavaScript document cannot update its own code from files rebuilt on disk.
+In development only, every API response includes `X-Cradle-Dev-Runtime-ID`. A changed ID stops stale state and shows **Cradle has restarted during development.** with Reload. If a local D1 reset invalidates an authenticated session, Cradle clears local onboarding/session state, explains the reset, and returns to Create Household.
 
-Before diagnosing a local connection failure, preserve the database and establish runtime ownership: use `lsof -nP -iTCP:8788 -sTCP:LISTEN` to identify the listener, inspect its parent process, and confirm that it belongs to the attached project-specific Wrangler command. The attached terminal must receive the browser request, and its PID must remain stable. If the request is absent and the browser reports `ERR_CONNECTION_REFUSED`, there is no API request ID and handler debugging must wait until browser and runtime ownership agree. Stop only stale Cradle Wrangler/workerd processes; never treat an arbitrary listener on port 8788 as authoritative.
-
-In development only, every `/api/` response has an `X-Cradle-Dev-Runtime-ID` header. An open browser document stores the first value it sees; if a later response has a different value, Cradle stops the stale onboarding flow and shows **“Cradle has restarted during development.”** with a Reload action. A development-only 401 from `/api/auth/session` after an authenticated session is treated as a recreated local D1 database: the invalid session cookie and local onboarding state are cleared, and the user is sent to Create Household with an explanatory notice. Neither behavior is enabled in production.
-
-Transport failures alone use “Cradle couldn’t connect.” Typed API failures retain their safe server message and request ID. Room forms retain values after a failed mutation. Once creation succeeds, a subsequent refresh failure is reported as “Room saved” and the form is cleared so retry cannot create a duplicate.
-
-Companion names and palette selections remain mounted after a failed save. Retrying issues a fresh PUT after the runtime recovers.
+Only transport failures say **Cradle couldn’t connect**. Typed API errors retain their safe message and request ID. Forms preserve input after failure, and successful mutations are not repeated when only refresh fails.

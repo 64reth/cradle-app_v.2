@@ -1,10 +1,12 @@
-# Phase 3 authentication
+# Authentication and household invitations
 
-## Architecture
+## Account, Member and session separation
 
-Authentication decisions happen in Pages Functions. The browser receives an opaque bearer token in an HTTP-only cookie; D1 stores only its SHA-256 hash. Every protected request resolves one active, unexpired, unrevoked session and derives the household ID, member ID, and role from it. Protected queries use that derived household ID and ignore client-supplied identity.
+Authentication decisions happen in Pages Functions. A `user_account` is the credential-bearing identity; a household `Member` is the durable person-in-the-home profile. Managed and unclaimed Members intentionally have no account or session. A Member with access links to at most one account, and an account can claim at most one Member in a household.
 
-Household creation inserts the household and first `owner` in one D1 batch, then starts a session. Sign-in uses a household lookup reference, household-scoped profile reference, and PIN.
+The browser receives an opaque bearer token in an HTTP-only cookie. D1 stores only its SHA-256 hash. Every protected request resolves one active, unexpired, unrevoked session and derives the account, household, Member and role from it. Protected queries use that derived household ID and ignore client-supplied identity.
+
+Household creation inserts the household, Owner Member and Owner account in a D1 batch, then starts an account-linked session. Phase 3 Members with credentials stored on the Member row remain sign-in compatible during the additive migration.
 
 ## PIN hashing
 
@@ -12,32 +14,47 @@ PINs are 4–12 digits. They use a 16-byte cryptographically random salt and Web
 
 ## Sessions and cookies
 
-Session tokens contain 32 random bytes and last 30 days. Missing, expired, revoked, and inactive-member sessions fail closed. Sign-out revokes the exact session and clears the cookie.
+Session tokens contain 32 random bytes and last 30 days. Missing, expired, revoked, suspended-Member and left-Member sessions fail closed. Sign-out revokes the exact session and clears the cookie. Suspending a Member revokes that Member’s open sessions.
 
 `cradle_session` uses `HttpOnly`, `SameSite=Lax`, `Path=/`, and explicit `Max-Age`. Production adds `Secure`. Local Pages development uses HTTP, so `Secure` is omitted only outside production; JavaScript still cannot read the cookie.
 
-## Invitations and roles
+## Invitations
 
-Owners and Parent/Admins can create 48-hour, single-use invitations for `parent_admin`, `adult`, or `child`; owners cannot be invited. Twelve random bytes form the raw code, which is returned once. Only its SHA-256 hash is stored. Expired, redeemed, or revoked codes fail. Conditional redemption and member insertion run in one D1 batch.
+Owner and Parent/Admin can create single-purpose profile invitations or general household invitations with 24-hour, 7-day or 30-day expiry. Raw links and short codes are returned only at creation or regeneration; D1 stores SHA-256 hashes.
+
+- A profile invitation has a fixed target Member. Acceptance conditionally creates an account, links only that Member, consumes the invitation and starts a session.
+- A general invitation creates an account and a pending join request. It never creates an active Member or session before leadership approval.
+- Repeated profile acceptance by the same account verifies the PIN and starts a fresh session without creating duplicate records.
+- Revoked, expired, exhausted and unknown invitations return distinct typed errors.
+- Regeneration revokes the previous secret and inserts its replacement in one D1 batch.
+
+The legacy `POST /api/auth/join` auto-join behavior is retired and returns `INVITATION_FLOW_UPDATED`. Pets and family-member cat avatars are not identities: they never receive credentials, roles, or sessions.
+
+## Roles
 
 | Capability | Owner | Parent/Admin | Adult | Child |
 | --- | --- | --- | --- | --- |
-| View membership | Yes | Yes | Yes | Own safe row only |
-| Create invitations | Yes | Yes | No | No |
+| View household family context | Yes | Yes | Yes | Limited safe context |
+| Create/revoke invitations | Yes | Yes | No | No |
+| Review join requests | Yes | Yes | No | No |
+| Edit ordinary Member profiles | Yes | Child/dependant within policy | No | Own names only |
 | View session / sign out | Yes | Yes | Yes | Yes |
+
+Server authorization is centralized in the family-access policy. Parent/Admin cannot alter ownership or another Parent/Admin. Adults and Children cannot change household roles.
 
 ## Throttling and limitations
 
-Failed sign-ins are keyed by a hash of connecting IP, household reference, and profile reference. Five failures in a 15-minute window block that key for 15 minutes; success clears it. Production should supplement this D1-compatible mechanism with Cloudflare rate limiting and monitoring.
+Failed sign-ins are keyed by a hash of connecting IP, household reference and profile reference. Five failures in a 15-minute window block that key for 15 minutes; success clears it. Production should supplement this D1-compatible mechanism with Cloudflare rate limiting and monitoring.
 
-This phase has no recovery, OAuth, email identity, passkeys, session-management UI, or distributed abuse controls.
-
-After authentication, the application resolves the server-persisted household setup state. Authentication never treats Rooms or Pets as identities. Pets cannot receive PINs, invitations, roles, or sessions.
+This phase has no recovery, OAuth, email delivery, passkeys, session-management UI or distributed abuse controls. Invitation delivery uses explicit copy, QR and platform Share actions rather than pretending an email was sent.
 
 ## Routes and local development
 
-- `POST /api/auth/households`, `/api/auth/sign-in`, `/api/auth/join`, `/api/auth/sign-out`
-- `GET /api/auth/session`, `/api/household/members`
-- `POST /api/household/invitations`
+- Auth: `POST /api/auth/households`, `/api/auth/sign-in`, `/api/auth/sign-out`; `GET /api/auth/session`
+- Public invitation: `GET /api/invites/:reference`; `POST /api/invites/:reference/accept`
+- Family: `GET|POST /api/household/members`; `PATCH /api/household/members/:memberId`
+- Access: `POST /api/household/members/:memberId/suspend`
+- Invitations: `GET|POST /api/household/invites`; revoke and regenerate actions under `/:inviteId`
+- Join requests: `GET /api/household/join-requests`; approve and decline actions under `/:requestId`
 
-All return typed no-store envelopes with request IDs. Run `npm run build`, `npm run db:reset:local`, `npm run db:migrate`, then `npm run dev:pages`. Local D1 state is ignored under `.wrangler/`.
+All responses use typed no-store envelopes with request IDs. Development responses also expose the runtime/build identifier used to detect a restarted local runtime. Run `npm run build`, `npm run db:reset:local`, `npm run db:migrate`, then `npm run dev:pages`. Local D1 state is ignored under `.wrangler/`.

@@ -14,7 +14,8 @@ type Context = { request: Request; env: CradleEnv; next: () => Promise<Response>
 export async function onRequest(context: Context): Promise<Response> {
   const response = await context.next();
   const url = new URL(context.request.url);
-  if (context.env.APP_ENV !== "development" || !url.pathname.startsWith("/api/")) return response;
+  const apiResponse = url.pathname.startsWith("/api/") || url.pathname === "/health";
+  if (context.env.APP_ENV !== "development" || !apiResponse) return response;
 
   const headers = new Headers(response.headers);
   developmentRuntimeId ||= crypto.randomUUID();

@@ -14,18 +14,32 @@ export async function onRequestGet({ request, env }: Context): Promise<Response>
         household: { name: identity.householdName, reference: identity.householdReference },
         lead: { displayName: identity.displayName, role: identity.role }, members: [], rooms: [], pets: [] }, requestId);
     }
-    const [members, rooms, pets, companion] = await Promise.all([
-      db.prepare("SELECT id, display_name AS displayName, profile_reference AS profileReference, role FROM members WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all(),
-      db.prepare("SELECT id, name, description, room_type AS roomType, display_order AS displayOrder FROM rooms WHERE household_id = ? AND is_active = 1 ORDER BY display_order, created_at").bind(identity.householdId).all(),
-      db.prepare("SELECT id, name, pet_type AS petType, breed, notes FROM pets WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all(),
-      db.prepare(`SELECT id, name, fur_palette_key AS furPaletteKey, patch_primary_palette_key AS patchPrimaryPaletteKey,
-        patch_secondary_palette_key AS patchSecondaryPaletteKey, expression_key AS expressionKey
-        FROM companions WHERE household_id = ? AND is_active = 1 LIMIT 1`).bind(identity.householdId).first()
+    const [members, rooms, pets] = await Promise.all([
+      db.prepare(`SELECT m.id, m.display_name AS displayName, m.profile_reference AS profileReference, m.role,
+        m.lifecycle_state AS lifecycleState, m.access_level AS accessLevel, m.age_band AS ageBand,
+        CASE WHEN m.account_id IS NULL THEN 0 ELSE 1 END AS hasAccount,
+        c.id AS avatarId, c.fur_palette_key AS avatarFurPaletteKey,
+        c.patch_primary_palette_key AS avatarPatchPrimaryPaletteKey,
+        c.patch_secondary_palette_key AS avatarPatchSecondaryPaletteKey,
+        c.expression_key AS avatarExpressionKey
+        FROM members m
+        LEFT JOIN member_companions c ON c.household_id = m.household_id
+          AND c.member_id = m.id AND c.is_active = 1
+        WHERE m.household_id = ? AND m.lifecycle_state != 'left' ORDER BY m.created_at`)
+        .bind(identity.householdId).all(),
+      db.prepare(`SELECT r.id, r.name, r.description, r.room_type AS roomType, r.display_order AS displayOrder,
+        COALESCE('[' || group_concat('"' || ro.member_id || '"') || ']', '[]') AS occupantMemberIdsJson
+        FROM rooms r LEFT JOIN room_occupants ro ON ro.household_id = r.household_id AND ro.room_id = r.id
+        WHERE r.household_id = ? AND r.is_active = 1 GROUP BY r.id
+        ORDER BY r.display_order, r.created_at`).bind(identity.householdId).all(),
+      db.prepare("SELECT id, name, pet_type AS petType, breed, notes FROM pets WHERE household_id = ? AND is_active = 1 ORDER BY created_at").bind(identity.householdId).all()
     ]);
     return success({ state, canConfigure: identity.role === "owner",
       household: { name: identity.householdName, reference: identity.householdReference },
       lead: { displayName: identity.displayName, profileReference: identity.profileReference, role: identity.role },
-      members: members.results, rooms: rooms.results, pets: pets.results, companion }, requestId);
+      members: members.results, rooms: rooms.results.map((room) => ({
+        ...room, occupantMemberIds: JSON.parse(String(room.occupantMemberIdsJson || "[]"))
+      })), pets: pets.results }, requestId);
   });
 }
 export async function onRequest(context: Context) {

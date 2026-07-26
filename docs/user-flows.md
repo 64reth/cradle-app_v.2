@@ -2,20 +2,26 @@
 
 ## New household
 
-Public entry → create household and Owner → automatic session → Leadership → Members → typed Rooms → optional Pets → Companion → Review → Complete → `/dashboard`.
+Create household and Owner → Leadership → Family → create the Owner’s cat → Rooms → optional Pets → Review → Complete → Dashboard.
 
-Setup progress is stored in D1. Returning Owners resume the persisted step. A non-Owner in an incomplete household sees a waiting state.
+Setup progress is stored in D1. Returning Owners resume the persisted step. A non-Owner in an incomplete household sees a clear waiting state. The cat step saves the real Owner’s member avatar and never creates a fictional participant.
 
 ## Existing household
 
-A person redeems a one-use invitation or signs in with household reference, profile reference, and PIN. Completed households open at home. Incomplete households route according to persisted setup status and authorization.
+A person opens a private invitation link/code or signs in with household reference, profile reference, and PIN. A profile invitation claims only its named family member. A general invitation creates a leadership-reviewed join request. Accepted family members customise their own cat once, then continue to Dashboard without replaying Owner household setup.
 
-## Dashboard routine setup
+## Dashboard, Family Status, and My Cradle
 
-Dashboard welcome → **Continue setup** → one Room or Pet at a time → accept/skip suggested routines → choose plain frequency → choose a person, household leaders, future rotation, or decide later → optionally add a short custom routine → review the next context → save household plan → return to Dashboard.
+Dashboard → Family Status → select one real family member. The signed-in person may continue to My Cradle and customise their cat appearance. A Household admin may manage a Managed member through Family. Cats use the family member’s name and never appear as separate people.
 
-The server hydrates canonical steps and defaults; the household does not author a technical workflow. Reopening setup resumes from server-derived configured routines. Applying the same plan is safe and does not create duplicates.
+Dashboard → Manage family → add a family member → invite now, add another, invite later, or finish. Creation is retry-safe and does not manufacture an account.
 
-Systems navigation opens a friendly routine library grouped by Room, Pet, or whole household. Ordinary editing contains name, frequency, responsibility, active/paused state, note, and checklist disclosure. Purpose, source, definition of done, and duration remain secondary advanced details.
+Dashboard → My Cradle → edit permitted names, customise cat appearance, view the honest task state, or send a suggestion → return to My Cradle or Dashboard.
 
-Typed or transport failures remain inside the setup/editor card with local choices intact. A successful apply returns the refreshed Dashboard aggregate in the same response, avoiding a fragile follow-up refresh.
+## Routines and Schedule
+
+Finish Rooms → Cradle creates a sensible routine first draft → Dashboard → Review routines → keep, pause, edit, remove, or add a custom routine. The server owns canonical templates and retry-safe persistence.
+
+Dashboard → Household Schedule → add a Meeting, appointment, trip, or reminder → choose time, recurrence, reminder, and relevant family members → save → Schedule or Dashboard.
+
+Every flow follows the app-wide no-dead-end policy: browser Back is never the only route.

@@ -1,24 +1,16 @@
-# Companion assets
+# Family avatar assets
 
-## Architecture
+The historical filename is retained so existing references remain stable. These assets render family-member cat avatars, not a separate household identity.
 
-The shared household Companion is rendered from production PNG sheets:
+The renderer layers four production PNG sheets:
 
 1. `/companions/companion-fur.png`
 2. `/companions/companion-patch-primary.png`
 3. `/companions/companion-patch-secondary.png`
-4. `/companions/companion-expressions.png` as the top outline/expression layer
+4. `/companions/companion-expressions.png`
 
-Every frame is 64×64 pixels. Expressions are one 384×64 row with frames: neutral, on track, completed, calm, behind, needs help. Palette sheets are 64×512 with eight rows.
+Each frame is 64×64. Stable palette and expression values live in `shared/companion.ts`; the member-owned default adapter lives in `shared/member-avatar.ts`; and `FamilyAvatar` is the canonical UI wrapper. The internal `Companion` component name is retained only as the low-level sprite renderer.
 
-The Fur order is orange, grey, charcoal, cream, brown, blue-grey, white, ginger. Both Patch sheets actually use cream, orange, charcoal, grey, brown, blue-grey, white, ginger; this differs from Fur and is represented explicitly in `shared/companion.ts`.
+Run `npm run assets:companion` to verify dimensions, transparency, frame positions, and artwork-derived swatches. Original PNGs are never changed.
 
-## Swatch method
-
-Run `npm run assets:companion`. The deterministic Sharp-based inspection reads RGBA pixels, verifies exact dimensions and transparency, divides palette sheets into 64px rows, ignores fully transparent pixels, and selects the most frequent remaining colour in each row. The resulting swatches are checked against the canonical metadata in automated tests. Original PNG files are never mutated.
-
-## Persistence
-
-One active Companion configuration belongs to one household. D1 stores stable palette keys and an expression key, never sprite row numbers or arbitrary colours. The renderer and server resolve rows from the same canonical definitions.
-
-The Companion is not a member, role, Pet, or identity. It has no credentials or session. Reaction logic, moods, rewards, animation, household status, task state, pet care, and Today’s Mission integration are deferred.
+D1 stores stable appearance keys in the legacy `member_companions` table. It never stores sprite positions or arbitrary colours. The required legacy `name` column mirrors the real family member’s name for schema compatibility and is not a product identity.

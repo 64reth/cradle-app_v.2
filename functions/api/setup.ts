@@ -1,4 +1,4 @@
-import type { Identity } from "./auth";
+import { identityAccessLevel, type Identity } from "./auth";
 import { authorizationError, validationError } from "./http";
 import type { JsonRecord } from "./types";
 
@@ -6,8 +6,8 @@ export type SetupStep = "leadership" | "members" | "rooms" | "pets" | "companion
 export type HouseholdRoutineAccess = "manage" | "view_active" | "none";
 
 export function householdRoutineAccess(identity: Identity): HouseholdRoutineAccess {
-  if (identity.role === "owner" || identity.role === "parent_admin") return "manage";
-  if (identity.role === "adult") return "view_active";
+  if (identityAccessLevel(identity) === "household_admin") return "manage";
+  if (identityAccessLevel(identity) === "household_member") return "view_active";
   return "none";
 }
 
@@ -20,11 +20,11 @@ export function requireHouseholdManager(identity: Identity): void {
 }
 
 export function requireSystemsViewer(identity: Identity): "all" | "active" {
-  if (identity.setupStatus !== "complete") throw authorizationError("Complete household setup before opening Systems.");
+  if (identity.setupStatus !== "complete") throw authorizationError("Complete household setup before opening Routines.");
   const access = householdRoutineAccess(identity);
   if (access === "manage") return "all";
   if (access === "view_active") return "active";
-  throw authorizationError("Systems are not available for this profile.");
+  throw authorizationError("Routines are not available for this family member.");
 }
 
 export function optionalText(body: JsonRecord, field: string, max: number): string | null {

@@ -4,167 +4,283 @@ function assert(value, message) {
   if (!value) throw new Error(message);
 }
 
-async function call(path, method = "GET", data, cookie = "") {
+async function raw(path, method = "GET", data, cookie = "") {
   const response = await fetch(`${base}${path}`, {
     method,
-    credentials: "same-origin",
     headers: {
       ...(data === undefined ? {} : { "content-type": "application/json" }),
       ...(cookie ? { cookie } : {})
     },
     ...(data === undefined ? {} : { body: JSON.stringify(data) })
   });
-  const body = await response.json();
-  const nextCookie = response.headers.get("set-cookie")?.split(";")[0] || cookie;
-  assert(response.ok, `${method} ${path} failed (${response.status}): ${JSON.stringify(body)}`);
-  assert(body.requestId, `${method} ${path} did not return a request ID`);
-  return { body, cookie: nextCookie, status: response.status };
+  let body;
+  try { body = await response.json(); } catch { body = {}; }
+  return {
+    response,
+    body,
+    cookie: response.headers.get("set-cookie")?.split(";")[0] || cookie
+  };
+}
+
+async function call(path, method = "GET", data, cookie = "") {
+  const result = await raw(path, method, data, cookie);
+  assert(result.response.ok,
+    `${method} ${path} failed (${result.response.status}): ${JSON.stringify(result.body)}`);
+  assert(result.body.requestId, `${method} ${path} did not include a request ID`);
+  return result;
 }
 
 const suffix = Date.now().toString().slice(-6);
 const created = await call("/api/auth/households", "POST", {
-  householdName: `Dashboard Smoke ${suffix}`,
-  displayName: "Review Owner",
+  householdName: `Assignment Review ${suffix}`,
+  displayName: "Gareth",
   pin: "4829",
   pinConfirmation: "4829"
 });
-const cookie = created.cookie;
-assert(cookie, "Household creation did not set a session cookie");
+const ownerCookie = created.cookie;
+const householdReference = created.body.data.householdReference;
+assert(ownerCookie, "Household creation did not establish the Owner session");
 
 const requestIds = [created.body.requestId];
-async function step(path, method = "POST", data) {
-  const result = await call(path, method, data ?? (method === "GET" ? undefined : {}), cookie);
+async function ownerCall(path, method = "GET", data) {
+  const result = await call(path, method, data, ownerCookie);
   requestIds.push(result.body.requestId);
   return result.body.data;
 }
 
-await step("/api/household/setup/leadership", "PATCH");
-const invitation = await step("/api/household/invitations", "POST", { role: "adult" });
-const joined = await call("/api/auth/join", "POST", {
-  invitationCode: invitation.code,
-  displayName: "Review Participant",
-  pin: "5931",
-  pinConfirmation: "5931"
-});
-const participantCookie = joined.cookie;
-assert(participantCookie && joined.body.data.role === "adult", "Adult participant did not join");
-await step("/api/household/setup/members-complete");
+await ownerCall("/api/household/setup/leadership", "PATCH", {});
+const ownerId = (await ownerCall("/api/household/members")).members
+  .find(({ role }) => role === "owner")?.id;
+assert(ownerId, "The canonical Owner Family member could not be resolved");
+async function addMember(displayName, accessLevel, ageBand) {
+  return (await ownerCall("/api/household/members", "POST", {
+    displayName,
+    accessLevel,
+    ageBand,
+    clientKey: `${displayName.toLowerCase()}-${suffix}`
+  })).member;
+}
 
-const kitchen = await step("/api/household/rooms", "POST", {
-  name: "Kitchen", roomType: "kitchen", description: "Main kitchen"
+const gillian = await addMember("Gillian", "household_admin", "adult");
+const sam = await addMember("Sam", "household_member", "adult");
+const tyrel = await addMember("Tyrel", "managed_member", "teen");
+const taryn = await addMember("Taryn", "managed_member", "child");
+const retry = await ownerCall("/api/household/members", "POST", {
+  displayName: "Tyrel",
+  accessLevel: "managed_member",
+  ageBand: "teen",
+  clientKey: `tyrel-${suffix}`
 });
-const bathroom = await step("/api/household/rooms", "POST", {
-  name: "Bathroom", roomType: "bathroom", description: "Family bathroom"
-});
-const bedroom = await step("/api/household/rooms", "POST", {
-  name: "Bedroom", roomType: "bedroom", description: "Main bedroom"
-});
-await step("/api/household/setup/rooms-complete");
-const pet = await step("/api/household/pets", "POST", {
-  name: "Tori", petType: "cat", breed: "Domestic shorthair", notes: "Indoor cat"
-});
-await step("/api/household/setup/pets-complete");
-await step("/api/household/companion", "PUT", {
-  name: "Mochi", furPaletteKey: "orange", patchPrimaryPaletteKey: "ginger",
-  patchSecondaryPaletteKey: "cream", expressionKey: "neutral"
-});
-await step("/api/household/setup/companion-complete");
-await step("/api/household/setup/complete");
+assert(retry.created === false && retry.member.id === tyrel.id,
+  "Retrying Family creation duplicated a Managed member");
 
-const dashboard = await step("/api/dashboard", "GET");
-assert(dashboard.household.name.includes("Dashboard Smoke"), "Dashboard household was incorrect");
-assert(dashboard.rooms.length === 3 && dashboard.pets[0].name === "Tori", "Dashboard context was incomplete");
-assert(dashboard.companion.name === "Mochi", "Dashboard Companion was missing");
-assert(dashboard.setup.routinesChosen === false && dashboard.todayMission.state === "setup",
-  "Fresh Dashboard did not show routine guidance");
-const recommendationKeys = dashboard.recommendations.map(({ templateKey }) => templateKey);
-for (const templateKey of [
-  "kitchen.evening_reset", "bathroom.daily_reset", "bedroom.weekly_clean",
-  "pet.cat.morning_feed", "pet.cat.refresh_water"
-]) assert(recommendationKeys.includes(templateKey), `Missing recommendation ${templateKey}`);
-assert(!("tasks" in dashboard) && !("progressPercentage" in dashboard), "Dashboard fabricated task or performance data");
-
-const owner = dashboard.members.find(({ role }) => role === "owner");
-const participant = dashboard.members.find(({ displayName }) => displayName === "Review Participant");
-assert(owner && participant, "Routine responsibility options were incomplete");
-const selectedKeys = new Set([
-  "kitchen.evening_reset", "bathroom.daily_reset", "bedroom.weekly_clean",
-  "pet.cat.morning_feed", "pet.cat.refresh_water"
-]);
-const selections = dashboard.recommendations.filter(({ templateKey }) => selectedKeys.has(templateKey)).map((recommendation, index) => ({
-  templateKey: recommendation.templateKey,
-  clientKey: null,
-  enabled: true,
-  roomId: recommendation.roomId,
-  petId: recommendation.petId,
-  frequency: recommendation.templateKey === "bedroom.weekly_clean" ? "weekly" : "daily",
-  ownerMemberId: index % 2 ? participant.id : owner.id,
-  rotationEnabled: recommendation.templateKey === "bathroom.daily_reset",
-  rotationMemberIds: recommendation.templateKey === "bathroom.daily_reset" ? [owner.id, participant.id] : [],
-  customisedName: "",
-  note: ""
-}));
-const customKey = `custom-${suffix}`;
-selections.push({
-  templateKey: null, clientKey: customKey, enabled: true,
-  roomId: kitchen.room.id, petId: null, frequency: "twice_weekly",
-  ownerMemberId: participant.id, rotationEnabled: false, rotationMemberIds: [],
-  customisedName: "Water kitchen herbs", note: "Check the soil first"
+await ownerCall("/api/household/setup/members-complete", "POST", {});
+await ownerCall("/api/me/avatar", "PUT", {
+  furPaletteKey: "orange",
+  patchPrimaryPaletteKey: "cream",
+  patchSecondaryPaletteKey: "white",
+  expressionKey: "neutral"
 });
-const applyPayload = { householdId: "forged-household", selections };
-const applied = await step("/api/household/routine-setup/apply", "POST", applyPayload);
-assert(applied.activeRoutineCount === 6, `Expected 6 active routines, found ${applied.activeRoutineCount}`);
-assert(applied.setup.routinesChosen && applied.setup.readyForPlanning, "Dashboard setup progress did not advance");
-assert(applied.todayMission.state === "ready" && !("tasks" in applied.todayMission), "Today’s Mission was not an honest ready state");
+await ownerCall("/api/household/setup/avatar-complete", "POST", {});
 
-const reapplied = await step("/api/household/routine-setup/apply", "POST", applyPayload);
-assert(reapplied.activeRoutineCount === 6 && reapplied.routines.length === 6, "Repeating setup created duplicate routines");
-const refreshed = await step("/api/dashboard", "GET");
-assert(refreshed.activeRoutineCount === 6 && refreshed.setup.routinesChosen, "Routine setup did not survive Dashboard refresh");
-const library = await step("/api/household/systems?status=active", "GET");
-assert(library.routines.length === 6, "Friendly routine library did not contain the generated routines");
-const generated = library.routines.find(({ sourceTemplateKey }) => sourceTemplateKey === "kitchen.evening_reset");
-assert(generated?.roomId === kitchen.room.id, "Kitchen routine lost its Room context");
-assert(library.routines.some(({ petId }) => petId === pet.pet.id), "Pet-care routine lost Pet context");
-const adultLibrary = await call("/api/household/systems?status=archived", "GET", undefined, participantCookie);
-assert(adultLibrary.body.data.routines.length === 6 && adultLibrary.body.data.canManage === false,
-  "Adult active-only routine view was incorrect");
+async function addRoom(name, roomType, occupantMemberIds = []) {
+  return (await ownerCall("/api/household/rooms", "POST", {
+    name,
+    roomType,
+    occupantMemberIds
+  })).room;
+}
+
+const parentsRoom = await addRoom("Parents’ bedroom", "bedroom", [ownerId, gillian.id]);
+const childrenRoom = await addRoom("Children’s bedroom", "child_bedroom", [tyrel.id, taryn.id]);
+await addRoom("Kitchen", "kitchen");
+await addRoom("Bathroom", "bathroom");
+await addRoom("Shared living area", "living_room");
+await ownerCall("/api/household/setup/rooms-complete", "POST", {});
+await ownerCall("/api/household/setup/pets-complete", "POST", {});
+await ownerCall("/api/household/setup/complete", "POST", {});
+
+const dashboard = await ownerCall("/api/dashboard");
+assert(dashboard.members.length === 5, "Family Status did not contain exactly five real Family members");
+assert(dashboard.rooms.length === 5, "The five-room household did not persist");
+assert(dashboard.activeRoutineCount > 0, "No active Routines were generated");
+assert(dashboard.incompleteTaskCount > 0, "Today’s Mission was not populated after setup");
+assert(dashboard.members.every(({ dailyProgress }) =>
+  dailyProgress?.percentage === 100 && ["On track", "Ready"].includes(dailyProgress?.status)),
+  "Family Status did not begin with valid full green states");
+
+const together = await ownerCall("/api/together/today");
+const togetherPrimary = together.moments.find(({ isPrimary }) => isPrimary);
+assert(togetherPrimary, "Today’s Moment was not generated for the household");
+const togetherRefresh = await ownerCall("/api/together/today");
+assert(togetherRefresh.moments.find(({ isPrimary }) => isPrimary)?.id === togetherPrimary.id,
+  "Together generation was not idempotent across refresh");
+const togetherSwap = await ownerCall(`/api/together/${togetherPrimary.id}/swap`, "POST", {});
+assert(togetherSwap.id !== togetherPrimary.id, "Together swap did not create a replacement Moment");
+const togetherAfterSwap = await ownerCall("/api/together/today");
+assert(togetherAfterSwap.moments.length <= 2 && togetherAfterSwap.moments.filter(({ isPrimary }) => isPrimary).length === 1,
+  "Together swap created duplicate or multiple primary Moments");
+
+const routineLibrary = await ownerCall("/api/household/systems");
+const activeRoutines = routineLibrary.routines.filter(({ status }) => status === "active");
+const parentRotations = activeRoutines.filter(({ roomId, assignmentMode }) =>
+  roomId === parentsRoom.id && assignmentMode === "rotation");
+assert(parentRotations.length > 0, "Parents’ bedroom did not receive a Rotation");
+assert(parentRotations.every(({ participantMemberIds }) =>
+  JSON.stringify([...participantMemberIds].sort()) === JSON.stringify([ownerId, gillian.id].sort())),
+  "Parents’ bedroom Rotation was not limited to its occupants");
+
+const childShared = activeRoutines.find(({ roomId, assignmentMode }) =>
+  roomId === childrenRoom.id && assignmentMode === "shared_team");
+assert(childShared, "Children’s bedroom did not receive a Shared-team Routine");
+assert(JSON.stringify([...childShared.participantMemberIds].sort()) ===
+  JSON.stringify([tyrel.id, taryn.id].sort()),
+  "Children’s Shared team did not match the room occupants");
+
+const commonRotations = activeRoutines.filter(({ roomId, assignmentMode }) =>
+  ![parentsRoom.id, childrenRoom.id].includes(roomId) && assignmentMode === "rotation");
+assert(commonRotations.length > 4, "Common Rooms did not receive enough balanced Rotations");
+assert(new Set(commonRotations.slice(0, 5).map(({ rotationNextIndex }) => rotationNextIndex)).size > 1,
+  "Every generated Rotation began at the same carousel position");
+assert(commonRotations.some(({ rotationNextIndex }) => rotationNextIndex !== 0),
+  "Generated responsibility silently fell back to the Owner");
+
+const editable = commonRotations.find(({ participantMemberIds }) => participantMemberIds.length >= 3);
+assert(editable, "No editable household Rotation was available");
+const detail = (await ownerCall(`/api/household/systems/${editable.id}`)).routine;
+const removedMemberId = detail.rotationMembers.at(-1).memberId;
+const retainedMemberIds = detail.rotationMembers.slice(0, -1).map(({ memberId }) => memberId);
+await ownerCall(`/api/household/systems/${editable.id}`, "PATCH", {
+  name: detail.name,
+  frequency: detail.frequency,
+  status: detail.status,
+  assignmentMode: "rotation",
+  assignedMemberId: null,
+  participantMemberIds: retainedMemberIds,
+  note: detail.note,
+  customFrequencyNote: detail.customFrequencyNote
+});
+const edited = (await ownerCall(`/api/household/systems/${editable.id}`)).routine;
+assert(!edited.rotationMembers.some(({ memberId }) => memberId === removedMemberId),
+  "An unchecked Rotation member was silently re-added");
+assert(JSON.stringify(edited.rotationMembers.map(({ memberId }) => memberId)) ===
+  JSON.stringify(retainedMemberIds), "Rotation selection did not survive reload");
+
+async function acceptProfile(member, pin) {
+  const invite = (await ownerCall("/api/household/invites", "POST", {
+    targetMemberId: member.id,
+    expiry: "7_days"
+  })).invite;
+  const accepted = await call(`/api/invites/${invite.token}/accept`, "POST", {
+    displayName: member.displayName,
+    pin,
+    pinConfirmation: pin,
+    clientKey: `accept-${member.id}-${suffix}`
+  });
+  assert(accepted.cookie, `${member.displayName} did not receive a session`);
+  return accepted.cookie;
+}
+
+const gillianCookie = await acceptProfile(gillian, "5931");
+const samCookie = await acceptProfile(sam, "6742");
+const ownerTasks = (await call("/api/me", "GET", undefined, ownerCookie)).body.data;
+const gillianTasks = (await call("/api/me", "GET", undefined, gillianCookie)).body.data;
+const samTasks = (await call("/api/me", "GET", undefined, samCookie)).body.data;
+const tyrelTasks = (await call(`/api/me?memberId=${tyrel.id}`, "GET", undefined, ownerCookie)).body.data;
+const tarynTasks = (await call(`/api/me?memberId=${taryn.id}`, "GET", undefined, ownerCookie)).body.data;
+const taskViews = [ownerTasks, gillianTasks, samTasks, tyrelTasks, tarynTasks];
+assert(taskViews.every(({ personalTasks }) => Array.isArray(personalTasks.tasks)),
+  "A Family member’s My Tasks view was not derived from task instances");
+assert(taskViews.every(({ personalTasks }) => personalTasks.tasks.length > 0),
+  "Balanced generation left at least one Family member without today’s assigned work");
+assert(tyrelTasks.personalTasks.tasks.some(({ assignmentMode }) => assignmentMode === "shared_team") &&
+  tarynTasks.personalTasks.tasks.some(({ assignmentMode }) => assignmentMode === "shared_team"),
+  "Shared-team work was not visible to every required participant");
+
+const managedTask = tyrelTasks.personalTasks.tasks.find(({ contributionState, assignmentMode }) =>
+  contributionState !== "complete" && assignmentMode !== "shared_team") ||
+  tyrelTasks.personalTasks.tasks.find(({ contributionState }) => contributionState !== "complete");
+assert(managedTask, "No Managed-member task was available for help acceptance");
+await ownerCall(`/api/household/tasks/${managedTask.id}/help`, "POST", {
+  requestedByMemberId: tyrel.id,
+  helperMemberId: ownerId
+});
+const ownerWithHelp = (await call("/api/me", "GET", undefined, ownerCookie)).body.data;
+assert(ownerWithHelp.helpRequested.some(({ id }) => id === managedTask.id),
+  "A help request did not appear in the helper’s My Cradle");
+await ownerCall(`/api/household/tasks/${managedTask.id}/complete`, "POST", {});
+const tyrelAfterHelp = (await call(`/api/me?memberId=${tyrel.id}`, "GET", undefined, ownerCookie)).body.data;
+assert(tyrelAfterHelp.personalTasks.tasks.find(({ id }) => id === managedTask.id)?.contributionState === "complete",
+  "Helper sign-off did not complete the Managed member’s requested contribution");
+
+const refreshed = await ownerCall("/api/dashboard");
+assert(refreshed.members.find(({ id }) => id === tyrel.id)?.dailyProgress?.percentage === 100,
+  "Completing work did not preserve or restore the Family member’s full daily state");
+const expectedRemaining = dashboard.incompleteTaskCount -
+  (managedTask.assignmentMode === "shared_team" ? 0 : 1);
+assert(refreshed.incompleteTaskCount === expectedRemaining,
+  "Today’s Mission counter did not come from incomplete current-day tasks");
 
 const other = await call("/api/auth/households", "POST", {
-  householdName: `Isolated Smoke ${suffix}`, displayName: "Other Owner",
-  pin: "4829", pinConfirmation: "4829"
+  householdName: `Isolation Review ${suffix}`,
+  displayName: "Other Owner",
+  pin: "4829",
+  pinConfirmation: "4829"
 });
-const otherCookie = other.cookie;
-async function otherStep(path, method = "POST", data = {}) {
-  return (await call(path, method, method === "GET" ? undefined : data, otherCookie)).body.data;
-}
-await otherStep("/api/household/setup/leadership", "PATCH");
-await otherStep("/api/household/setup/members-complete");
-await otherStep("/api/household/rooms", "POST", { name: "Other Kitchen", roomType: "kitchen" });
-await otherStep("/api/household/setup/rooms-complete");
-await otherStep("/api/household/setup/pets-complete");
-await otherStep("/api/household/companion", "PUT", {
-  name: "Other Cat", furPaletteKey: "grey", patchPrimaryPaletteKey: "cream",
-  patchSecondaryPaletteKey: "white", expressionKey: "neutral"
-});
-await otherStep("/api/household/setup/companion-complete");
-await otherStep("/api/household/setup/complete");
-const crossHousehold = await fetch(`${base}/api/household/systems/${generated.id}`, {
-  headers: { cookie: otherCookie }
-});
-assert(crossHousehold.status === 404, "Another household could read a generated routine");
+const crossRead = await raw(`/api/household/systems/${editable.id}`, "GET", undefined, other.cookie);
+const crossComplete = await raw(`/api/household/tasks/${managedTask.id}/complete`, "POST", {}, other.cookie);
+assert(crossRead.response.status >= 400 && crossComplete.response.status >= 400 &&
+  !crossRead.body.data && !crossComplete.body.data,
+  "Another household could read or modify canonical assignment data");
+
+const duplicateCheck = await ownerCall("/api/dashboard");
+assert(duplicateCheck.activeRoutineCount === refreshed.activeRoutineCount,
+  "Refreshing onboarding output duplicated generated Routines");
 
 console.log(JSON.stringify({
   base,
   route: "/dashboard",
-  householdReference: created.body.data.householdReference,
-  rooms: [kitchen.room.name, bathroom.room.name, bedroom.room.name],
-  pet: pet.pet.name,
-  recommendationsVerified: [...selectedKeys],
-  activeRoutines: refreshed.activeRoutineCount,
-  customRoutine: "Water kitchen herbs",
-  repeatedApplyCreatedDuplicates: false,
+  householdReference,
+  family: {
+    householdAdmins: ["Gareth", "Gillian"],
+    householdMembers: ["Sam"],
+    managedTeen: "Tyrel",
+    managedChild: "Taryn"
+  },
+  rooms: {
+    parentsBedroom: [ownerId, gillian.id],
+    childrenBedroom: [tyrel.id, taryn.id],
+    common: ["Kitchen", "Bathroom", "Shared living area"]
+  },
+  allocation: {
+    activeRoutines: refreshed.activeRoutineCount,
+    parentBedroomRotations: parentRotations.length,
+    childrenSharedTeam: childShared.name,
+    balancedCommonStarts: commonRotations.slice(0, 8).map(({ rotationNextIndex }) => rotationNextIndex),
+    ownerDidNotReceiveEverything: true,
+    savedSubsetSurvivedReload: true
+  },
+  today: {
+    initialIncomplete: dashboard.incompleteTaskCount,
+    afterHelpCompletion: refreshed.incompleteTaskCount,
+    allFiveTaskViewsPopulated: true,
+    helpRequestCompleted: true
+  },
+  together: {
+    primaryId: togetherPrimary.id,
+    stableAcrossRefresh: true,
+    swapped: true,
+    dailyMomentCount: togetherAfterSwap.moments.length
+  },
+  familyStatus: {
+    initialPercentages: dashboard.members.map(({ displayName, dailyProgress }) => ({
+      displayName,
+      percentage: dailyProgress.percentage,
+      status: dailyProgress.status
+    })),
+    managedMemberRecovered: true
+  },
   tenantIsolation: true,
-  fakeTaskInstances: false,
-  requestIds
+  duplicateRoutines: false,
+  requestCount: requestIds.length
 }, null, 2));

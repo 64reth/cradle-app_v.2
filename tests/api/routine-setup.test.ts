@@ -13,14 +13,16 @@ const room = { id: "kitchen", name: "Kitchen", roomType: "kitchen" };
 const pet = { id: "tori", name: "Tori", petType: "cat" };
 const members = [
   { id: "owner", displayName: "Alex", role: "owner" },
-  { id: "adult", displayName: "Sam", role: "adult" }
+  { id: "adult", displayName: "Sam", role: "adult" },
+  { id: "teen", displayName: "Tyrel", role: "child" },
+  { id: "child", displayName: "Taryn", role: "child" }
 ];
 type Existing = { id: string; sourceTemplateKey: string | null; clientKey: string | null;
   roomId: string | null; petId: string | null; status: string; name: string };
 
 function mockDb(options: {
   current?: Identity | null; rooms?: object[]; pets?: object[]; members?: object[]; existing?: Existing[];
-  batchFails?: boolean;
+  summaryRoutines?: object[]; batchFails?: boolean;
 } = {}) {
   const calls: Array<{ sql: string; values: unknown[] }> = []; const batches: unknown[][] = [];
   const current = options.current === undefined ? identity : options.current;
@@ -42,7 +44,7 @@ function mockDb(options: {
           if (sql.includes("FROM household_systems") && !sql.includes("JOIN members")) {
             return { results: options.existing ?? [] };
           }
-          if (sql.includes("FROM household_systems s")) return { results: [] };
+          if (sql.includes("FROM household_systems s")) return { results: options.summaryRoutines ?? [] };
           if (sql.includes("FROM household_system_participants")) return { results: [] };
           return { results: [] };
         },
@@ -127,6 +129,30 @@ describe("Dashboard and guided routine setup API", () => {
     });
   });
 
+  it("derives checklist completion from required persisted data without optional feature flags", async () => {
+    const activeRoutine = {
+      id: "routine", name: "Household reset", status: "active", frequency: "weekly",
+      roomId: null, roomName: null, petId: null, petName: null, ownerMemberId: "owner", ownerName: "Alex",
+      note: null, stepCount: 1, sourceKind: "custom", sourceTemplateKey: null, rotationEnabled: 0
+    };
+    const complete = mockDb({ pets: [], summaryRoutines: [activeRoutine] });
+    const completeBody = await (await dashboardRoute({
+      request: request("/api/dashboard"), env: { DB: complete.db }
+    })).json() as { data: { setup: { complete: boolean; readyForPlanning: boolean; steps: object[] } } };
+    expect(completeBody.data.setup).toMatchObject({ complete: true, readyForPlanning: true });
+    expect(completeBody.data.setup.steps).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "pets", complete: false })
+    ]));
+
+    const requiredRoomRemoved = mockDb({ rooms: [], pets: [], summaryRoutines: [activeRoutine] });
+    const removedBody = await (await dashboardRoute({
+      request: request("/api/dashboard"), env: { DB: requiredRoomRemoved.db }
+    })).json() as { data: { setup: { complete: boolean; readyForPlanning: boolean;
+      steps: Array<{ key: string; complete: boolean }> } } };
+    expect(removedBody.data.setup).toMatchObject({ complete: false, readyForPlanning: false });
+    expect(removedBody.data.setup.steps).toContainEqual(expect.objectContaining({ key: "rooms", complete: false }));
+  });
+
   it("hydrates canonical templates server-side and applies the aggregate in one batch", async () => {
     const { db, calls, batches } = mockDb();
     const response = await applyRoutines({ request: request("/api/household/routine-setup/apply", "POST", {
@@ -202,11 +228,12 @@ describe("Dashboard and guided routine setup API", () => {
   it("persists rotation intent only for eligible household Members", async () => {
     const { db, calls } = mockDb();
     const response = await applyRoutines({ request: request("/api/household/routine-setup/apply", "POST", {
-      selections: [{ ...selection, rotationEnabled: true, rotationMemberIds: ["owner", "adult"] }]
+      selections: [{ ...selection, rotationEnabled: true, rotationMemberIds: ["owner", "adult", "teen", "child"] }]
     }), env: { DB: db } });
     expect(response.status).toBe(200);
     const participants = calls.filter(({ sql }) => sql.includes("INSERT INTO household_system_participants"));
-    expect(participants).toHaveLength(2);
+    expect(participants).toHaveLength(4);
+    expect(participants.flatMap(({ values }) => values)).toEqual(expect.arrayContaining(["teen", "child"]));
     expect(participants.flatMap(({ values }) => values)).not.toContain("tori");
   });
 

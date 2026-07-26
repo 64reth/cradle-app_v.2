@@ -74,6 +74,12 @@ describe("API envelopes", () => {
     });
     expect(development.headers.get("X-Cradle-Dev-Runtime-ID")).toEqual(expect.any(String));
     expect(development.headers.get("Set-Cookie")).toContain("cradle_session=; ");
+    const health = await developmentMiddleware({
+      request: new Request("http://localhost:8788/health"),
+      env: { APP_ENV: "development" },
+      next: async () => success({ status: "ok" }, "health-request")
+    });
+    expect(health.headers.get("X-Cradle-Dev-Runtime-ID")).toBe(development.headers.get("X-Cradle-Dev-Runtime-ID"));
 
     const production = await developmentMiddleware({
       request: new Request("https://cradle.test/api/auth/session"),

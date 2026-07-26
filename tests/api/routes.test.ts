@@ -6,7 +6,6 @@ import { onRequestPost as signOutRoute } from "../../functions/api/auth/sign-out
 import { onRequestPost as createPet } from "../../functions/api/household/pets/index";
 import { onRequestDelete as deletePet, onRequestPatch as updatePet } from "../../functions/api/household/pets/[petId]";
 import { PET_TYPE_VALUES } from "../../shared/pets";
-import { onRequestPut as putCompanion } from "../../functions/api/household/companion";
 import { onRequestPost as createRoom } from "../../functions/api/household/rooms/index";
 
 type Identity = { sessionId: string; householdId: string; householdName: string; householdReference: string;
@@ -24,7 +23,7 @@ function mockDb(identity: Identity, members: object[] = []) {
         all: async () => ({ results: members }),
         run: async () => ({ success: true, meta: { changes: 1 } }) };
     } };
-  } } as unknown as D1Database;
+  }, batch: async (statements: unknown[]) => statements.map(() => ({ success: true, meta: { changes: 1 } })) } as unknown as D1Database;
   return { db, calls };
 }
 
@@ -43,16 +42,17 @@ describe("protected Phase 3 routes", () => {
     const { db, calls } = mockDb(owner, [{ displayName: "Alex", profileReference: "alex", role: "owner" }]);
     const response = await membersRoute({ request: request("/api/household/members?household_id=house-b"), env: { DB: db } });
     expect(response.status).toBe(200);
-    expect(calls.find((call) => call.sql.includes("FROM members WHERE"))?.values).toEqual(["house-a"]);
+    expect(calls.find((call) => call.sql.includes("FROM members m"))?.values).toEqual(["house-a"]);
   });
 
-  it("returns only the signed-in child's safe membership state", async () => {
+  it("returns a safe family representation to a signed-in Child", async () => {
     const child = { ...owner, role: "child", displayName: "Casey", profileReference: "casey" };
-    const { db, calls } = mockDb(child);
+    const safeMembers = [{ id: "casey", displayName: "Casey", role: "child", lifecycleState: "active" }];
+    const { db, calls } = mockDb(child, safeMembers);
     const response = await membersRoute({ request: request("/api/household/members"), env: { DB: db } });
     const body = await response.json() as { data: { members: object[] } };
-    expect(body.data.members).toEqual([{ displayName: "Casey", profileReference: "casey", role: "child" }]);
-    expect(calls.some((call) => call.sql.includes("FROM members WHERE"))).toBe(false);
+    expect(body.data.members).toEqual(safeMembers);
+    expect(calls.find((call) => call.sql.includes("FROM members m"))?.values).toEqual(["house-a"]);
   });
 
   it("stores a hash instead of the raw invitation code", async () => {
@@ -61,11 +61,12 @@ describe("protected Phase 3 routes", () => {
       method: "POST", body: JSON.stringify({ role: "adult" })
     }), env: { DB: db } });
     const body = await response.json() as { data: { code: string } };
-    const insert = calls.find((call) => call.sql.includes("INSERT INTO invitation_codes"));
+    const insert = calls.find((call) => call.sql.includes("INSERT INTO household_invites"));
     expect(response.status).toBe(201);
     expect(insert?.values).toContain("house-a");
     expect(insert?.values).not.toContain(body.data.code);
     expect(insert?.values).toContain(await sha256(body.data.code));
+    expect(body.data).toHaveProperty("inviteUrl");
   });
 
   it("denies invitation creation to adults", async () => {
@@ -144,47 +145,6 @@ describe("protected Phase 3 routes", () => {
     }
   });
 
-  it("upserts a valid default Companion within the session household", async () => {
-    const { db, calls } = mockDb({ ...owner, setupStep: "companion" });
-    const response = await putCompanion({ request: request("/api/household/companion", {
-      method: "PUT", body: JSON.stringify({ name: "Cradle Cat", furPaletteKey: "orange",
-        patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "white", expressionKey: "neutral" })
-    }), env: { DB: db } });
-    expect(response.status).toBe(200);
-    const upsert = calls.find((call) => call.sql.includes("INSERT INTO companions"));
-    expect(upsert?.values).toContain("house-a");
-    expect(upsert?.values).toContain("Cradle Cat");
-    expect(upsert?.values).not.toContain("house-b");
-  });
-
-  it("rejects invalid Companion names, palettes, and expressions", async () => {
-    const invalid = [
-      { name: "", furPaletteKey: "orange", patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "white", expressionKey: "neutral" },
-      { name: "Cat", furPaletteKey: "purple", patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "white", expressionKey: "neutral" },
-      { name: "Cat", furPaletteKey: "orange", patchPrimaryPaletteKey: "purple", patchSecondaryPaletteKey: "white", expressionKey: "neutral" },
-      { name: "Cat", furPaletteKey: "orange", patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "purple", expressionKey: "neutral" },
-      { name: "Cat", furPaletteKey: "orange", patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "white", expressionKey: "dancing" }
-    ];
-    for (const body of invalid) {
-      const { db } = mockDb({ ...owner, setupStep: "companion" });
-      const response = await putCompanion({ request: request("/api/household/companion", {
-        method: "PUT", body: JSON.stringify(body)
-      }), env: { DB: db } });
-      expect(response.status).toBe(400);
-    }
-  });
-
-  it("denies Adult and Child Companion configuration during setup", async () => {
-    for (const role of ["adult", "child"]) {
-      const { db } = mockDb({ ...owner, role, setupStep: "companion" });
-      const response = await putCompanion({ request: request("/api/household/companion", {
-        method: "PUT", body: JSON.stringify({ name: "Cat", furPaletteKey: "orange",
-          patchPrimaryPaletteKey: "cream", patchSecondaryPaletteKey: "white", expressionKey: "neutral" })
-      }), env: { DB: db } });
-      expect(response.status).toBe(403);
-    }
-  });
-
   it("matches the frontend Room creation contract and includes the session tenant", async () => {
     const { db, calls } = mockDb({ ...owner, setupStep: "rooms" });
     const response = await createRoom({ request: request("/api/household/rooms", {
@@ -196,5 +156,36 @@ describe("protected Phase 3 routes", () => {
     expect(body.data.room.name).toBe("Kitchen");
     const insert = calls.find((call) => call.sql.includes("INSERT INTO rooms"));
     expect(insert?.values).toContain("house-a");
+  });
+
+  it("persists optional Room occupants from the canonical active Family collection", async () => {
+    const roomOwner = { ...owner, setupStep: "rooms" };
+    const { db, calls } = mockDb(roomOwner, [{ id: "owner-a" }, { id: "child-a" }]);
+    const response = await createRoom({ request: request("/api/household/rooms", {
+      method: "POST", body: JSON.stringify({
+        name: "Children’s bedroom",
+        roomType: "child_bedroom",
+        occupantMemberIds: ["owner-a", "child-a"]
+      })
+    }), env: { DB: db } });
+    expect(response.status).toBe(201);
+    const occupantInserts = calls.filter(({ sql }) => sql.includes("INSERT INTO room_occupants"));
+    expect(occupantInserts).toHaveLength(2);
+    expect(occupantInserts.map(({ values }) => values[2])).toEqual(["owner-a", "child-a"]);
+    expect(occupantInserts.every(({ values }) => values[0] === "house-a")).toBe(true);
+  });
+
+  it("rejects a Room occupant outside the authenticated household", async () => {
+    const roomOwner = { ...owner, setupStep: "rooms" };
+    const { db, calls } = mockDb(roomOwner, [{ id: "owner-a" }]);
+    const response = await createRoom({ request: request("/api/household/rooms", {
+      method: "POST", body: JSON.stringify({
+        name: "Bedroom",
+        roomType: "bedroom",
+        occupantMemberIds: ["foreign-member"]
+      })
+    }), env: { DB: db } });
+    expect(response.status).toBe(400);
+    expect(calls.some(({ sql }) => sql.includes("INSERT INTO rooms"))).toBe(false);
   });
 });

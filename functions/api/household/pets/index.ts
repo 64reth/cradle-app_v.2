@@ -3,6 +3,7 @@ import { authenticate, textField } from "../../auth";
 import { handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success, validationError } from "../../http";
 import { optionalText, requireHouseholdManager, requireStep } from "../../setup";
 import type { CradleEnv } from "../../types";
+import { generateRoutineDraft } from "../../routine-generation";
 type Context = { request: Request; env: CradleEnv };
 export async function onRequestGet({ request, env }: Context) {
   return handleApiRequest(request, async (requestId) => {
@@ -23,6 +24,7 @@ export async function onRequestPost({ request, env }: Context) {
     const id = crypto.randomUUID(); const now = new Date().toISOString();
     await db.prepare("INSERT INTO pets (id, household_id, name, pet_type, breed, notes, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)")
       .bind(id, identity.householdId, name, body.petType, breed, notes, now, now).run();
+    if (identity.setupStatus === "complete") await generateRoutineDraft(db, identity.householdId);
     return success({ pet: { id, name, petType: body.petType, breed, notes } }, requestId, { status: 201 });
   });
 }

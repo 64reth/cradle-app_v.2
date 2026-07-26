@@ -1,13 +1,15 @@
-# Database Foundation
+# Database workflow
 
-Phase 2 establishes only foundation tables:
+Cradle uses ordered, additive D1 migrations. The current schema includes:
 
-- `households`
-- `members`
-- `sessions`
-- `invitation_codes`
+- household, Member, account, session, and invitation records;
+- typed Rooms and optional Pets;
+- internal routine definitions, steps, and rotation participants;
+- household events and linked family members;
+- task suggestions;
+- one member-owned cat appearance per family member.
 
-Rooms, tasks, routines, systems, maintenance, plans, reviews, and companion persistence are intentionally out of scope for this phase.
+The historical synthetic `companions` table remains only because old migrations are immutable. Migration `0007` deactivates legacy rows and prevents active rows from being recreated. Active product code does not query or write it.
 
 ## Naming Conventions
 

@@ -25,7 +25,7 @@ export function Companion({ config }: { config: CompanionConfig }) {
     "--expression-position": `${frame * -192}px`
   } as CSSProperties;
   return <div className="companion-figure" role="img"
-    aria-label={`${config.name}, the household Companion cat, shown with a ${config.furPaletteKey.replace("_", "-")} coat`}>
+    aria-label={`${config.name}’s cat avatar, shown with a ${config.furPaletteKey.replace("_", "-")} coat`}>
     <div className="companion-sprite" style={style}>
       <span className="sprite-layer sprite-fur" />
       <span className="sprite-layer sprite-patch-one" />

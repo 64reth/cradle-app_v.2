@@ -1,71 +1,112 @@
-import { useEffect, useMemo, useState } from "react";
-import { ROUTINE_FREQUENCIES, frequencyLabel, type RoomType, type RoutineFrequency } from "../shared/routines";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ROOM_TYPES, ROUTINE_FREQUENCIES, frequencyLabel, type RoomType, type RoutineFrequency } from "../shared/routines";
 import type { PetType } from "../shared/pets";
-import { Companion, type CompanionConfig } from "./Companion";
+import { memberAvatar, memberAvatarTone, type MemberAvatar } from "../shared/member-avatar";
 import { api, failureMessage, jsonInit } from "./api";
+import { FamilyPanel } from "./Family";
+import { eventTypeLabel, type EventRecurrence, type HouseholdEventType } from "../shared/coordination";
+import { FamilyAvatar } from "./FamilyAvatar";
+import type { RoutineAssignmentMode } from "../shared/assignments";
+import { MemberSelector } from "./MemberSelector";
+import { CradleIcon } from "./components/ui/CradleIcon";
+import type { TogetherMoment } from "../shared/together";
+import { participantContext } from "../shared/together";
 
-export type DashboardMember = { id: string; displayName: string; role: string };
+export type AuthenticatedView = "dashboard" | "systems" | "calendar" | "me" | "meals" | "together";
+export type DashboardMember = {
+  id: string; displayName: string; preferredName?: string | null; role: string;
+  accessLevel?: string; ageBand?: string; ageGroup?: string | null;
+  lifecycleState?: string; relationshipLabel?: string | null; hasAccount?: number;
+  avatarId?: string | null; avatarFurPaletteKey?: MemberAvatar["furPaletteKey"] | null;
+  avatarPatchPrimaryPaletteKey?: MemberAvatar["patchPrimaryPaletteKey"] | null;
+  avatarPatchSecondaryPaletteKey?: MemberAvatar["patchSecondaryPaletteKey"] | null;
+  avatarExpressionKey?: MemberAvatar["expressionKey"] | null;
+  dailyProgress?: {
+    percentage: number; status: string; expression: MemberAvatar["expressionKey"];
+    assigned: number; complete: number; overdue: number; hasWork: boolean;
+  };
+};
 export type RoutineSummary = {
   id: string; name: string; status: "draft" | "active" | "paused" | "archived"; frequency: RoutineFrequency;
   roomId: string | null; roomName: string | null; petId: string | null; petName: string | null;
   ownerMemberId: string; ownerName: string; note: string | null; stepCount: number;
   sourceKind: "template" | "custom"; sourceTemplateKey: string | null; rotationEnabled: boolean;
   rotationMemberIds: string[];
+  assignmentMode?: RoutineAssignmentMode; assignedMemberId?: string | null;
+  participantMemberIds?: string[]; rotationNextIndex?: number;
 };
 export type RoutineRecommendation = {
   selectionKey: string; templateKey: string; templateVersion: number; contextType: "room" | "pet";
   roomId: string | null; roomName: string | null; petId: string | null; petName: string | null;
   name: string; frequency: RoutineFrequency; estimatedMinutes: number; defaultEnabled: boolean;
-  steps: readonly string[]; configuredRoutine: RoutineSummary | null;
+  steps: readonly string[]; defaultAssignment: "rotate" | "assigned"; configuredRoutine: RoutineSummary | null;
 };
 export type DashboardData = {
-  household: { name: string; reference: string };
-  currentUser: { id: string; displayName: string; role: string };
+  household: { name: string; reference: string; timezone?: string };
+  currentUser: { id: string; displayName: string; role: string; accessLevel?: string; ageBand?: string };
   members: DashboardMember[];
   rooms: Array<{ id: string; name: string; roomType: RoomType }>;
   pets: Array<{ id: string; name: string; petType: PetType }>;
-  companion: (CompanionConfig & { id: string }) | null;
-  setup: { canManage: boolean; routinesChosen: boolean; readyForPlanning: boolean;
+  family: { canManage: boolean; pendingInviteCount: number; joinRequestCount: number };
+  suggestions: { canReview: boolean; openCount: number };
+  schedule: {
+    canCreate: boolean; canCreateLeadership: boolean; upcomingCount: number;
+    upcoming: Array<{ id: string; title: string; eventType: HouseholdEventType; startsAt: string;
+      endsAt: string | null; recurrence: EventRecurrence; reminderMinutes: number | null;
+      visibility: "household" | "leadership" }>;
+  };
+  setup: { canManage: boolean; routinesChosen: boolean; readyForPlanning: boolean; complete?: boolean;
     steps: Array<{ key: string; label: string; complete: boolean }> };
   recommendations: RoutineRecommendation[];
   routines: RoutineSummary[];
   activeRoutineCount: number;
+  incompleteTaskCount?: number;
+  todayMissions?: Array<{
+    id: string; title: string; roomName: string | null; petName: string | null;
+    duePeriod: string; dueAt: string | null; assignmentMode: RoutineAssignmentMode | "manual";
+    state: string; participants: Array<{ memberId: string; memberName: string; status: string; participantKind: "required" | "helper" }>;
+  }>;
   todayMission: { state: "setup" | "ready" | "waiting"; message: string };
   currentDate: string;
   deferredModules: string[];
+  together?: { localDate: string; moments: TogetherMoment[] };
 };
 
 type Choice = {
-  enabled: boolean; frequency: RoutineFrequency; ownerMemberId: string; responsibility: "leaders" | "person" | "rotate" | "later";
-  rotationMemberIds: string[]; customisedName: string; note: string; customFrequencyNote: string;
+  enabled: boolean; frequency: RoutineFrequency; assignedMemberId: string; assignmentMode: RoutineAssignmentMode;
+  participantMemberIds: string[]; customisedName: string; note: string; customFrequencyNote: string;
 };
 type CustomChoice = {
   clientKey: string; contextType: "room" | "pet" | "household"; roomId: string | null; petId: string | null;
-  name: string; frequency: RoutineFrequency; ownerMemberId: string; note: string; customFrequencyNote: string;
+  name: string; frequency: RoutineFrequency; assignedMemberId: string; note: string; customFrequencyNote: string;
 };
 type ApplySelection = {
   templateKey: string | null; clientKey: string | null; enabled: boolean;
-  roomId: string | null; petId: string | null; frequency: RoutineFrequency; ownerMemberId: string;
-  rotationEnabled: boolean; rotationMemberIds: string[]; customisedName: string; note: string;
+  roomId: string | null; petId: string | null; frequency: RoutineFrequency;
+  assignmentMode: RoutineAssignmentMode; assignedMemberId: string | null;
+  participantMemberIds: string[]; customisedName: string; note: string;
   customFrequencyNote: string;
 };
 
 const key = () => crypto.randomUUID();
-const roleLabel = (role: string) => role === "parent_admin" ? "Parent / Admin" : role[0].toUpperCase() + role.slice(1);
 const groupKey = (recommendation: RoutineRecommendation) =>
   `${recommendation.contextType}:${recommendation.roomId || recommendation.petId}`;
 
 function Navigation({ active, navigate, signOut }: {
-  active: "dashboard" | "systems"; navigate: (view: "dashboard" | "systems") => void; signOut: () => void;
+  active: AuthenticatedView; navigate: (view: AuthenticatedView) => void; signOut: () => void;
 }) {
   return <header className="dashboard-nav">
-    <button className="brand-button" onClick={() => navigate("dashboard")} aria-label="Cradle Dashboard">Cradle</button>
+    <button className="brand-button" onClick={() => navigate("dashboard")} aria-label="Cradle Dashboard"><CradleIcon name="household" decorative /> Cradle</button>
     <nav aria-label="Primary navigation">
-      <button aria-current={active === "dashboard" ? "page" : undefined} onClick={() => navigate("dashboard")}>Dashboard</button>
-      <button disabled title="Coming next">Plan <small>Next</small></button>
-      <button aria-current={active === "systems" ? "page" : undefined} onClick={() => navigate("systems")}>Systems</button>
-      <button disabled title="Coming next">Calendar <small>Next</small></button>
-      <button disabled title="Coming next">Messages <small>Next</small></button>
+      <button aria-current={active === "dashboard" ? "page" : undefined} onClick={() => navigate("dashboard")}><CradleIcon name="dashboard" decorative /> Dashboard</button>
+      <button aria-current={active === "systems" ? "page" : undefined} onClick={() => navigate("systems")}><CradleIcon name="routine" decorative /> Routines</button>
+      <button aria-current={active === "calendar" ? "page" : undefined}
+        onClick={() => navigate("calendar")}><CradleIcon name="calendar" decorative /> Schedule</button>
+      <button aria-current={active === "meals" ? "page" : undefined}
+        onClick={() => navigate("meals")}><CradleIcon name="cooking" decorative /> Meals</button>
+      <button aria-current={active === "together" ? "page" : undefined}
+        onClick={() => navigate("together")}><CradleIcon name="family" decorative /> Together</button>
+      <button aria-current={active === "me" ? "page" : undefined} onClick={() => navigate("me")}><CradleIcon name="member" decorative /> My Cradle</button>
     </nav>
     <button className="nav-signout" onClick={signOut}>Sign out</button>
   </header>;
@@ -74,7 +115,7 @@ function Navigation({ active, navigate, signOut }: {
 function RoutineSetup({ dashboard, onClose, onApplied }: {
   dashboard: DashboardData; onClose: () => void; onApplied: (data: DashboardData) => void;
 }) {
-  const eligibleMembers = dashboard.members.filter(({ role }) => role !== "child");
+  const eligibleMembers = dashboard.members;
   const defaultOwner = eligibleMembers.find(({ role }) => role === "owner")?.id ||
     eligibleMembers[0]?.id || dashboard.currentUser.id;
   const groups = useMemo(() => {
@@ -92,9 +133,12 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
       return [recommendation.selectionKey, {
         enabled: configured ? configured.status === "active" : recommendation.defaultEnabled,
         frequency: configured?.frequency || recommendation.frequency,
-        ownerMemberId: configured?.ownerMemberId || defaultOwner,
-        responsibility: configured?.rotationEnabled ? "rotate" : configured ? "person" : "leaders",
-        rotationMemberIds: configured?.rotationMemberIds || [],
+        assignedMemberId: configured?.assignedMemberId || defaultOwner,
+        assignmentMode: configured?.assignmentMode || (
+          recommendation.defaultAssignment === "rotate" && eligibleMembers.length ? "rotation" : "one_person"),
+        participantMemberIds: configured?.participantMemberIds ||
+          (recommendation.defaultAssignment === "rotate" && eligibleMembers.length > 1
+            ? eligibleMembers.map(({ id }) => id) : []),
         customisedName: configured?.name !== recommendation.name ? configured?.name || "" : "",
         note: configured?.note || "", customFrequencyNote: ""
       }];
@@ -117,7 +161,7 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
       clientKey: key(), contextType: context?.contextType || "household",
       roomId: context?.roomId || null, petId: context?.petId || null, name,
       frequency: form.get("frequency") as RoutineFrequency,
-      ownerMemberId: String(form.get("ownerMemberId") || defaultOwner),
+      assignedMemberId: String(form.get("assignedMemberId") || defaultOwner),
       note: String(form.get("note") || "").trim(),
       customFrequencyNote: String(form.get("customFrequencyNote") || "").trim()
     }]);
@@ -130,14 +174,17 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
       return {
         templateKey: recommendation.templateKey, clientKey: null, enabled: choice.enabled,
         roomId: recommendation.roomId, petId: recommendation.petId, frequency: choice.frequency,
-        ownerMemberId: choice.ownerMemberId, rotationEnabled: choice.responsibility === "rotate",
-        rotationMemberIds: choice.responsibility === "rotate" ? choice.rotationMemberIds : [],
+        assignmentMode: choice.assignmentMode,
+        assignedMemberId: choice.assignmentMode === "one_person" ? choice.assignedMemberId : null,
+        participantMemberIds: ["rotation", "shared_team"].includes(choice.assignmentMode)
+          ? choice.participantMemberIds : [],
         customisedName: choice.customisedName, note: choice.note, customFrequencyNote: choice.customFrequencyNote
       };
     }), ...custom.map((routine) => ({
       templateKey: null, clientKey: routine.clientKey, enabled: true, roomId: routine.roomId, petId: routine.petId,
-      frequency: routine.frequency, ownerMemberId: routine.ownerMemberId, rotationEnabled: false,
-      rotationMemberIds: [] as string[], customisedName: routine.name, note: routine.note,
+      frequency: routine.frequency, assignmentMode: "one_person" as const,
+      assignedMemberId: routine.assignedMemberId, participantMemberIds: [] as string[],
+      customisedName: routine.name, note: routine.note,
       customFrequencyNote: routine.customFrequencyNote
     }))];
     try {
@@ -147,8 +194,8 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
     finally { setBusy(false); }
   }
   if (!groups.length) return <section className="routine-setup-panel" aria-labelledby="routine-setup-title">
-    <button className="text-button" onClick={onClose}>← Dashboard</button><h2 id="routine-setup-title">Your home is ready for custom routines.</h2>
-    <p>Add routines later from the Systems library.</p></section>;
+    <button className="text-button" onClick={onClose}><CradleIcon name="back" decorative /> Dashboard</button><h2 id="routine-setup-title">Your home is ready for custom routines.</h2>
+    <p>You can add more later from Routines.</p></section>;
   return <section className="routine-setup-panel" aria-labelledby="routine-setup-title">
     <div className="setup-panel-heading"><div><p className="eyebrow">Step {groupIndex + 1} of {groups.length}</p>
       <h2 id="routine-setup-title">Choose what happens in {contextLabel}</h2>
@@ -171,23 +218,21 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
           {choice.frequency === "custom" && <label><span>Custom timing</span><input value={choice.customFrequencyNote}
             placeholder="For example, on the first Sunday"
             onChange={(event) => update(recommendation.selectionKey, { customFrequencyNote: event.target.value })} /></label>}
-          <label><span>Who usually handles this?</span><select value={choice.responsibility === "person" ? choice.ownerMemberId : choice.responsibility}
-            onChange={(event) => update(recommendation.selectionKey, event.target.value === "rotate"
-              ? { responsibility: "rotate", rotationMemberIds: eligibleMembers.slice(0, 2).map(({ id }) => id) }
-              : event.target.value === "leaders" || event.target.value === "later"
-                ? { responsibility: event.target.value, ownerMemberId: defaultOwner, rotationMemberIds: [] }
-                : { responsibility: "person", ownerMemberId: event.target.value, rotationMemberIds: [] })}>
-            <option value="leaders">Household leaders</option>
-            {eligibleMembers.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}
-            {eligibleMembers.length > 1 && <option value="rotate">Rotate between people</option>}
-            <option value="later">Decide later</option>
+          <label><span>How is this shared?</span><select value={choice.assignmentMode}
+            onChange={(event) => update(recommendation.selectionKey, {
+              assignmentMode: event.target.value as RoutineAssignmentMode
+            })}>
+            <option value="rotation">Rotation</option><option value="one_person">One person</option>
+            <option value="shared_team">Shared team</option><option value="decide_later">Decide later</option>
           </select></label>
-          {choice.responsibility === "rotate" && <fieldset className="rotation-people"><legend>Rotate between</legend>
-            {eligibleMembers.map((member) => <label className="checkbox-label" key={member.id}><input type="checkbox"
-              checked={choice.rotationMemberIds.includes(member.id)}
-              onChange={(event) => update(recommendation.selectionKey, { rotationMemberIds: event.target.checked
-                ? [...choice.rotationMemberIds, member.id] : choice.rotationMemberIds.filter((id) => id !== member.id) })} />{member.displayName}</label>)}
-          </fieldset>}
+          {choice.assignmentMode === "one_person" && <MemberSelector members={eligibleMembers} label="Who takes this?"
+            value={choice.assignedMemberId} onChange={(memberId) => update(recommendation.selectionKey, { assignedMemberId: memberId })} />}
+          {(choice.assignmentMode === "rotation" || choice.assignmentMode === "shared_team") &&
+            <MemberSelector members={eligibleMembers} multiple values={choice.participantMemberIds}
+              label={choice.assignmentMode === "rotation" ? "Rotation participants" : "Shared team"}
+              helperText={choice.assignmentMode === "rotation" ? "One person takes each turn." : "Everyone contributes to one mission."}
+              onValuesChange={(participantMemberIds) => update(recommendation.selectionKey, { participantMemberIds })} />}
+          {choice.assignmentMode === "decide_later" && <p className="soft-notice">This stays unassigned until reviewed.</p>}
           <details><summary>See what’s included</summary><ul>{recommendation.steps.map((step) => <li key={step}>{step}</li>)}</ul></details>
           <details><summary>Make it your own</summary>
             <label><span>Edit label</span><input value={choice.customisedName}
@@ -209,12 +254,12 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
         {ROUTINE_FREQUENCIES.map((frequency) => <option value={frequency.value} key={frequency.value}>{frequency.label}</option>)}</select></label>
       {newCustomFrequency === "custom" && <label><span>Custom timing</span><input name="customFrequencyNote"
         placeholder="For example, on the first Sunday" /></label>}
-      <label><span>Who usually handles it?</span><select name="ownerMemberId" defaultValue={defaultOwner}>
-        <option value={defaultOwner}>Household leaders</option>
+      <label><span>Who usually handles it?</span><select name="assignedMemberId" defaultValue={defaultOwner}>
+        <option value={defaultOwner}>{eligibleMembers.find(({ id }) => id === defaultOwner)?.displayName}</option>
         {eligibleMembers.filter(({ id }) => id !== defaultOwner).map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
       <label><span>Optional short note</span><textarea name="note" /></label>
       <div className="row-actions"><button className="primary">Add routine</button><button type="button" onClick={() => setAddingCustom(false)}>Cancel</button></div>
-    </form> : <button className="add-routine-button" onClick={() => setAddingCustom(true)}>+ Add something for {contextLabel}</button>}
+      </form> : <button className="add-routine-button" onClick={() => setAddingCustom(true)}><CradleIcon name="add" size="sm" decorative /> Add something for {contextLabel}</button>}
     {error && <p className="error" role="alert">{error}</p>}
     <div className="setup-panel-actions">
       <button disabled={groupIndex === 0 || busy} onClick={() => setGroupIndex((index) => index - 1)}>Back</button>
@@ -225,48 +270,298 @@ function RoutineSetup({ dashboard, onClose, onApplied }: {
   </section>;
 }
 
-export function Dashboard({ data, setData, navigate, signOut, startSetup = false, onSetupOpened }: {
-  data: DashboardData; setData: (data: DashboardData) => void; navigate: (view: "dashboard" | "systems") => void;
-  signOut: () => void; startSetup?: boolean; onSetupOpened?: () => void;
+function avatarFor(member: DashboardMember, celebrating = false): MemberAvatar {
+  const percentage = member.dailyProgress?.percentage ?? 100;
+  const thresholdExpression = percentage >= 76 ? "on_track" : percentage >= 51 ? "calm" : "behind";
+  return memberAvatar({
+    furPaletteKey: member.avatarFurPaletteKey || undefined,
+    patchPrimaryPaletteKey: member.avatarPatchPrimaryPaletteKey || undefined,
+    patchSecondaryPaletteKey: member.avatarPatchSecondaryPaletteKey || undefined,
+    expressionKey: celebrating ? "completed" : thresholdExpression
+  });
+}
+
+function familyStatus(member: DashboardMember): string {
+  if (member.dailyProgress) return member.dailyProgress.status;
+  if (member.lifecycleState === "managed") return "Managed profile";
+  if (member.lifecycleState === "invited") return "Invite pending";
+  if (member.lifecycleState === "unclaimed" || member.lifecycleState === "join_requested") return "Waiting to join";
+  if (!member.avatarId) return "Customise avatar";
+  return "Ready";
+}
+
+function isoWeek(dateString: string): number {
+  const date = new Date(`${dateString}T12:00:00Z`);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+}
+
+function FamilyStatusCard({ member, activate, celebrating = false }: {
+  member: DashboardMember;
+  activate: (element: HTMLButtonElement) => void;
+  celebrating?: boolean;
+}) {
+  const [scowling, setScowling] = useState(false);
+  const name = member.preferredName || member.displayName;
+  const status = familyStatus(member);
+  const percentage = member.dailyProgress?.percentage ?? 100;
+  const tone = percentage >= 76 ? "positive" : percentage >= 51 ? "steady" : percentage >= 26 ? "attention" : "support";
+  useEffect(() => {
+    if (percentage > 25 || celebrating) { setScowling(false); return; }
+    let active = true; let timeout: number | undefined; let cycle: number | undefined;
+    const offset = [...member.id].reduce((total, character) => total + character.charCodeAt(0), 0) % 6000;
+    const trigger = () => {
+      if (!active) return;
+      if (!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+        setScowling(true); timeout = window.setTimeout(() => setScowling(false), 1000);
+      }
+      cycle = window.setTimeout(trigger, 8000 + offset);
+    };
+    cycle = window.setTimeout(trigger, 8000 + offset);
+    return () => { active = false; if (cycle) window.clearTimeout(cycle); if (timeout) window.clearTimeout(timeout); };
+  }, [member.id, percentage, celebrating]);
+  const expressionAvatar = celebrating ? "completed" : percentage <= 25 && scowling ? "needs_help" : undefined;
+  return <button className={`family-status-card avatar-tone-${memberAvatarTone(member.id)} ${celebrating ? "celebrating" : ""} ${percentage <= 25 ? "low-support" : ""} ${scowling ? "scowling" : ""}`}
+    aria-label={`${name}: ${status}`} onClick={(event) => activate(event.currentTarget)}>
+    <span className="family-status-avatar">
+      <FamilyAvatar name={name} avatar={expressionAvatar ? { ...avatarFor(member), expressionKey: expressionAvatar } : avatarFor(member, celebrating)} />
+    </span>
+    <span className="family-status-info">
+      <strong>{name}</strong>
+      <span>{status}</span>
+      <span className="family-progress" role="progressbar" aria-label={`${name} daily household progress`}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}>
+        <span className={`family-progress-fill ${tone}`} style={{ width: `${percentage}%` }} />
+      </span>
+      <small>{percentage}%</small>
+    </span>
+  </button>;
+}
+
+export function Dashboard({ data, setData, navigate, signOut, startSetup = false, onSetupOpened,
+  startFamily = false, onFamilyOpened, suggest, openPersonalMember }: {
+  data: DashboardData; setData: (data: DashboardData) => void; navigate: (view: AuthenticatedView) => void;
+  signOut: () => void; startSetup?: boolean; onSetupOpened?: () => void; startFamily?: boolean;
+  onFamilyOpened?: () => void; suggest?: () => void;
+  openPersonalMember?: (memberId: string) => void;
 }) {
   const [setupOpen, setSetupOpen] = useState(startSetup);
+  const [familyOpen, setFamilyOpen] = useState(startFamily);
+  const [familyMemberToManage, setFamilyMemberToManage] = useState<string | undefined>();
+  const [focusedMember, setFocusedMember] = useState<DashboardMember | null>(null);
+  const checklistComplete = data.setup.complete ??
+    (data.setup.readyForPlanning && data.setup.steps.every(({ complete }) => complete));
+  const [setupReviewOpen, setSetupReviewOpen] = useState(!checklistComplete);
+  const [roomFormOpen, setRoomFormOpen] = useState(false);
+  const [setupError, setSetupError] = useState("");
+  const [roomBusy, setRoomBusy] = useState(false);
+  const [celebratingMemberIds, setCelebratingMemberIds] = useState<string[]>(() => {
+    try {
+      const value = JSON.parse(window.sessionStorage.getItem("cradle:task-celebration") || "[]");
+      window.sessionStorage.removeItem("cradle:task-celebration");
+      return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+    } catch { return []; }
+  });
+  const memberDialogRef = useRef<HTMLElement | null>(null);
+  const memberReturnFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => { if (startSetup) { setSetupOpen(true); onSetupOpened?.(); } }, [startSetup, onSetupOpened]);
-  const date = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" })
-    .format(new Date(`${data.currentDate}T12:00:00`));
+  useEffect(() => { if (startFamily) { setFamilyOpen(true); onFamilyOpened?.(); } }, [startFamily, onFamilyOpened]);
+  useEffect(() => { setSetupReviewOpen(!checklistComplete); }, [checklistComplete]);
+  useEffect(() => {
+    if (!celebratingMemberIds.length) return;
+    const timer = window.setTimeout(() => setCelebratingMemberIds([]), 950);
+    return () => window.clearTimeout(timer);
+  }, [celebratingMemberIds]);
+  useEffect(() => {
+    if (!focusedMember) return;
+    const dialog = memberDialogRef.current;
+    const focusable = () => [...(dialog?.querySelectorAll<HTMLElement>("button:not([disabled])") || [])];
+    requestAnimationFrame(() => focusable()[0]?.focus());
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setFocusedMember(null); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable(); if (!items.length) return;
+      const first = items[0]; const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => {
+      document.removeEventListener("keydown", keydown);
+      if (memberReturnFocusRef.current?.isConnected) memberReturnFocusRef.current.focus();
+    };
+  }, [focusedMember]);
+  const currentDate = new Date(`${data.currentDate}T12:00:00Z`);
+  const weekday = new Intl.DateTimeFormat(undefined, { weekday: "long", timeZone: "UTC" }).format(currentDate);
+  const calendarDate = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", timeZone: "UTC" }).format(currentDate);
+  const nextSetupStep = data.setup.steps.find(({ complete }) => !complete);
+  const [missionBusy, setMissionBusy] = useState<string | null>(null);
+  const [missionError, setMissionError] = useState("");
+  async function addRequiredRoom(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setRoomBusy(true); setSetupError("");
+    const form = event.currentTarget; const values = Object.fromEntries(new FormData(form));
+    try {
+      await api("/api/household/rooms", jsonInit("POST", values));
+      setData(await api<DashboardData>("/api/dashboard")); setRoomFormOpen(false); form.reset();
+    } catch (reason) { setSetupError(failureMessage(reason)); }
+    finally { setRoomBusy(false); }
+  }
+  function continueHomeSetup() {
+    if (nextSetupStep?.key === "rooms") { setRoomFormOpen(true); return; }
+    if (nextSetupStep?.key === "members") { setFamilyOpen(true); return; }
+    setSetupOpen(true);
+  }
+  async function completeMission(mission: NonNullable<DashboardData["todayMissions"]>[number]) {
+    setMissionBusy(mission.id); setMissionError("");
+    const currentMember = mission.participants.find(({ memberId, status }) =>
+      memberId === data.currentUser.id && status !== "complete");
+    const canOverride = data.currentUser.accessLevel === "household_admin" &&
+      mission.participants.some(({ memberId, status, participantKind }) =>
+        participantKind === "required" && status !== "complete" && data.members.find((member) => member.id === memberId)?.accessLevel === "managed_member");
+    if (!currentMember && !canOverride) {
+      setMissionError("This mission is assigned to another family member."); setMissionBusy(null); return;
+    }
+    try {
+      const result = await api<{ celebrationMemberIds?: string[] }>(`/api/household/tasks/${mission.id}/complete`, jsonInit("POST", canOverride ? { override: true } : {}));
+      if (result.celebrationMemberIds?.length) setCelebratingMemberIds(result.celebrationMemberIds);
+      setData(await api<DashboardData>("/api/dashboard"));
+    } catch (reason) { setMissionError(failureMessage(reason)); }
+    finally { setMissionBusy(null); }
+  }
   const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening";
+  const familyName = /\bfamily$/i.test(data.household.name.trim())
+    ? data.household.name.trim() : `${data.household.name.trim()} Family`;
+  if (familyOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
+    <FamilyPanel dashboard={data} initialMemberId={familyMemberToManage}
+      onClose={() => { setFamilyOpen(false); setFamilyMemberToManage(undefined); }} onChanged={setData} /></div>;
   if (setupOpen) return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
     <RoutineSetup dashboard={data} onClose={() => setSetupOpen(false)} onApplied={(next) => { setData(next); setSetupOpen(false); }} /></div>;
   return <div className="dashboard-shell"><Navigation active="dashboard" navigate={navigate} signOut={signOut} />
-    <section className="dashboard-greeting"><div><p className="eyebrow">{data.household.name}</p>
-      <h1>{greeting}, {data.currentUser.displayName}!</h1><p>{data.setup.routinesChosen ? "Your household plan is taking shape." : "Let’s get your household running."}</p></div>
-      <div className="date-card"><span>Today</span><strong>{date}</strong></div></section>
+    <section className="dashboard-greeting"><div>
+      <h1>{greeting} {familyName}</h1><p>Signed in as {data.currentUser.displayName}</p></div>
+      <div className="date-card" aria-label={`${weekday}, ${calendarDate}, week ${isoWeek(data.currentDate)}`}>
+        <span>{weekday}</span><strong>{calendarDate}</strong><small>Week {isoWeek(data.currentDate)}</small></div></section>
     <div className="dashboard-grid">
-      <section className="dashboard-card family-card"><div className="card-heading"><div><p className="eyebrow">Your people</p><h2>Household</h2></div>
-        <span>{data.members.length} {data.members.length === 1 ? "member" : "members"}</span></div>
-        <div className="family-list">{data.members.map((member) => <article key={member.id}><span className="member-avatar" aria-hidden="true">{member.displayName[0]}</span>
-          <div><strong>{member.displayName}</strong><small>{roleLabel(member.role)}</small></div></article>)}</div>
-        <p>{data.rooms.length} Rooms{data.pets.length ? ` · ${data.pets.length} ${data.pets.length === 1 ? "Pet" : "Pets"}` : ""}</p></section>
-      <section className="dashboard-card progress-card"><p className="eyebrow">Getting started</p><h2>Set up your home</h2>
-        <p>Cradle has suggested routines based on your Rooms and Pets. Choose what fits your household.</p>
+      <section className="dashboard-card family-status-section" aria-labelledby="family-status-title">
+        <div className="card-heading"><div><p className="eyebrow">Everyone belongs</p>
+          <h2 id="family-status-title">Family Status</h2></div>
+          <span>{data.members.length} {data.members.length === 1 ? "family member" : "family members"}</span></div>
+        <div className="family-status-grid">{data.members.map((member) =>
+          <FamilyStatusCard key={member.id} member={member}
+            celebrating={celebratingMemberIds.includes(member.id)} activate={(element) => {
+            memberReturnFocusRef.current = element; setFocusedMember(member);
+          }} />)}</div>
+        {data.family.canManage && <button onClick={() => setFamilyOpen(true)}>
+          Manage family{(data.family.joinRequestCount || data.family.pendingInviteCount)
+            ? ` · ${data.family.joinRequestCount + data.family.pendingInviteCount} waiting` : ""}
+        </button>}
+      </section>
+      <section className="dashboard-card today-mission-card"><div className="card-heading"><div>
+        <p className="eyebrow">Today at home</p><h2>Today’s Mission</h2></div>
+        <strong className="routine-count"
+          aria-label={data.incompleteTaskCount === undefined ? `${data.activeRoutineCount} routines` :
+            `${data.incompleteTaskCount} household missions remaining today`}>
+          {data.incompleteTaskCount ?? data.activeRoutineCount}</strong></div>
+        <p>{(data.incompleteTaskCount ?? data.activeRoutineCount) > 0
+          ? data.todayMission.message
+          : data.activeRoutineCount
+            ? "Today’s household missions are complete."
+          : "Choose a few routines so Cradle understands how your home works."}</p>
+        {!!data.todayMissions?.length && <div className="mission-list" aria-label="Today’s household missions">
+          {data.todayMissions.map((mission) => {
+            const incompleteParticipants = mission.participants.filter(({ status }) => status !== "complete");
+            const currentParticipant = mission.participants.find(({ memberId }) => memberId === data.currentUser.id);
+            const canOverride = data.currentUser.accessLevel === "household_admin" && incompleteParticipants.some(({ memberId, participantKind }) =>
+              participantKind === "required" && data.members.find((member) => member.id === memberId)?.accessLevel === "managed_member");
+            const canComplete = Boolean(currentParticipant && currentParticipant.status !== "complete") || canOverride;
+            return <article className={`mission-row ${mission.state === "complete" ? "complete" : ""}`} key={mission.id}>
+              <div className="mission-row-details"><strong><CradleIcon name="mission" size="sm" decorative /> {mission.title}</strong>
+                <small>{[mission.roomName || mission.petName, mission.duePeriod && mission.duePeriod[0].toUpperCase() + mission.duePeriod.slice(1)].filter(Boolean).join(" · ")}</small>
+                <span className="mission-assignees">{mission.participants.length ? `For ${mission.participants.map(({ memberName }) => memberName).join(", ")}` : "Unassigned"}</span></div>
+              <div className="mission-row-actions">{mission.state === "complete" ? <span className="task-state complete"><CradleIcon name="complete" size="sm" decorative /> Complete</span>
+                : canComplete ? <button className="primary" disabled={missionBusy === mission.id} onClick={() => void completeMission(mission)}>{missionBusy === mission.id ? "Saving…" : "Sign off"}</button>
+                : <span className="task-state">{mission.state === "waiting_for_team" ? "Waiting for team" : "Assigned"}</span>}
+                {currentParticipant && mission.state !== "complete" && <button className="mission-help-button" onClick={() => navigate("me")}><CradleIcon name="help" size="sm" decorative /> Need a hand?</button>}</div>
+            </article>;
+          })}
+        </div>}
+        {missionError && <p className="error" role="alert">{missionError}</p>}
+        {data.currentUser.role !== "child" && <button onClick={() => navigate("systems")}><CradleIcon name="routine" size="sm" decorative /> Review routines</button>}
+      </section>
+      <TodayMomentCard navigate={navigate} initialMoment={data.together?.moments.find((moment) => moment.isPrimary) || null} />
+      <section className="dashboard-card schedule-card"><div className="card-heading"><div><p className="eyebrow">Coordination</p>
+        <h2>Household Schedule</h2></div><span>{data.schedule.upcomingCount} planned</span></div>
+        {!data.schedule.upcoming.length ? <div className="empty-action"><p>Nothing planned yet.</p>
+          <p>Create a Family Meeting, appointment, trip or reminder so everyone knows what is coming up.</p>
+          {data.schedule.canCreate ? <button className="primary" onClick={() => navigate("calendar")}>Add to schedule</button>
+            : <button onClick={() => navigate("calendar")}>View Household Schedule</button>}</div>
+          : <><div className="schedule-preview">{data.schedule.upcoming.map((event) => <article key={event.id}>
+            <div><strong>{event.title}</strong><small>{eventTypeLabel(event.eventType)}</small></div>
+            <time dateTime={event.startsAt}>{new Intl.DateTimeFormat(undefined, {
+              weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+              timeZone: data.household.timezone
+            }).format(new Date(event.startsAt))}</time></article>)}</div>
+            <button onClick={() => navigate("calendar")}>View full schedule</button></>}</section>
+      <section className="dashboard-card suggestion-quick-card"><p className="eyebrow">Household ideas</p><h2>Notice something that needs doing?</h2>
+        <p>Suggestions stay collaborative and never become routines automatically.</p>
+        <button onClick={() => suggest ? suggest() : navigate("me")}>Suggest something</button>
+        {data.suggestions.canReview && data.suggestions.openCount > 0 && <small>{data.suggestions.openCount} open for household leadership to review.</small>}</section>
+      {setupReviewOpen && <section className="dashboard-card progress-card"><p className="eyebrow">Getting started</p><h2>Set up your home</h2>
+        <p>A few thoughtful choices help Cradle fit the way your family lives.</p>
         <ol>{data.setup.steps.map((step) => <li className={step.complete ? "complete" : ""} key={step.key}>
-          <span aria-hidden="true">{step.complete ? "✓" : "○"}</span>{step.label}</li>)}</ol>
-        {data.setup.canManage ? <button className="primary" onClick={() => setSetupOpen(true)}>{data.setup.routinesChosen ? "Review routines" : "Continue setup"}</button>
-          : <p className="soft-notice">Household leaders manage routine setup.</p>}</section>
-      <section className="dashboard-card mission-card"><p className="eyebrow">Today’s Mission</p><h2>{data.todayMission.state === "setup" ? "Your plan starts here." : "Routines ready."}</h2>
-        <p>{data.todayMission.message}</p>{data.todayMission.state !== "waiting" && <button
-          onClick={() => data.setup.routinesChosen ? navigate("systems") : setSetupOpen(true)}>
-          {data.setup.routinesChosen ? "View routines" : "Set up routines"}</button>}</section>
-      <section className="dashboard-card systems-summary"><div className="card-heading"><div><p className="eyebrow">Household routines</p><h2>Systems</h2></div>
-        <strong className="routine-count">{data.activeRoutineCount}</strong></div>
-        <p>{data.activeRoutineCount ? `${data.activeRoutineCount} active routines are ready for future planning.` : "Choose a few sensible defaults and Cradle will build the structure quietly."}</p>
-        <button onClick={() => navigate("systems")}>{data.activeRoutineCount ? "Open routine library" : "See routine library"}</button></section>
-      {data.companion && <section className="dashboard-card companion-dashboard-card"><div><p className="eyebrow">Household Companion</p>
-        <h2>{data.companion.name}</h2><p>A neutral welcome while Cradle learns your household.</p></div>
-        <Companion config={{ ...data.companion, expressionKey: "neutral" }} /></section>}
-      <section className="dashboard-card next-card"><p className="eyebrow">Coming next</p><h2>From routines to a daily plan</h2>
-        <p>Plan, Calendar and Messages will appear when Cradle can generate real dated household work. Nothing here is pretending to be complete.</p></section>
+          <span aria-hidden="true"><CradleIcon name={step.complete ? "complete" : "pending"} size="sm" decorative /></span>{step.label}</li>)}</ol>
+        {setupError && <p role="alert" className="error">{setupError}</p>}
+        {roomFormOpen && <form className="inline-form" onSubmit={addRequiredRoom}>
+          <label><span>Room name</span><input name="name" required /></label>
+          <label><span>Room type</span><select name="roomType">{ROOM_TYPES.map(({ value, label }) =>
+            <option value={value} key={value}>{label}</option>)}</select></label>
+          <div className="row-actions"><button className="primary" disabled={roomBusy}>{roomBusy ? "Adding…" : "Add Room"}</button>
+            <button type="button" onClick={() => setRoomFormOpen(false)}>Cancel</button></div>
+        </form>}
+        {data.setup.canManage ? <div className="row-actions">
+          {!checklistComplete && <button className="primary" onClick={continueHomeSetup}>
+            {nextSetupStep?.key === "rooms" ? "Add a Room" : nextSetupStep?.key === "members"
+              ? "Add family" : "Choose routines"}</button>}
+          {checklistComplete && <button onClick={() => setSetupReviewOpen(false)}>Close checklist</button>}
+        </div> : <p className="soft-notice">Your household leaders will take care of the remaining setup.</p>}</section>}
+      {!setupReviewOpen && checklistComplete && <aside className="setup-complete-strip" aria-label="Home setup">
+        <strong>Home setup complete <span aria-hidden="true"><CradleIcon name="complete" size="sm" decorative /></span></strong>
+        {data.setup.canManage && <button onClick={() => setSetupReviewOpen(true)}>Review setup</button>}
+      </aside>}
     </div>
+    {focusedMember && <section ref={memberDialogRef} className="personal-sheet companion-view-sheet" role="dialog" aria-modal="true"
+      aria-labelledby="family-member-title"><div><div><p className="eyebrow">Family Status</p>
+        <h2 id="family-member-title">{focusedMember.preferredName || focusedMember.displayName}</h2></div>
+        <button onClick={() => setFocusedMember(null)}>Close</button></div>
+      <FamilyAvatar name={focusedMember.preferredName || focusedMember.displayName} avatar={avatarFor(focusedMember)} />
+      <p>{familyStatus(focusedMember)}</p>
+      <div className="row-actions">{focusedMember.id === data.currentUser.id
+        ? <button className="primary" onClick={() => { setFocusedMember(null); navigate("me"); }}>
+          {focusedMember.avatarId ? "Edit appearance" : "Customise your cat"}</button>
+        : data.family.canManage && (focusedMember.accessLevel === "managed_member" || focusedMember.role === "child")
+          ? <><button className="primary" onClick={() => {
+            setFocusedMember(null); openPersonalMember?.(focusedMember.id);
+          }}>Open My Cradle</button><button onClick={() => {
+            setFocusedMember(null); setFamilyMemberToManage(focusedMember.id); setFamilyOpen(true);
+          }}>Manage family member</button></> : null}
+        <button onClick={() => setFocusedMember(null)}>Done</button></div></section>}
   </div>;
+}
+
+function TodayMomentCard({ navigate, initialMoment }: { navigate: (view: AuthenticatedView) => void; initialMoment: TogetherMoment | null }) {
+  const [moment, setMoment] = useState<TogetherMoment | null>(initialMoment); const [busy, setBusy] = useState(false);
+  useEffect(() => { setMoment(initialMoment); }, [initialMoment]);
+  async function act(action: "swap" | "accept" | "start" | "complete") {
+    if (!moment) return; setBusy(true);
+    try { const next = await api<TogetherMoment>(`/api/together/${moment.id}/${action}`, jsonInit("POST", {})); setMoment(next); }
+    catch { /* the Together page provides the full retry and error context */ }
+    finally { setBusy(false); }
+  }
+  return <section className="dashboard-card today-moment-card" aria-labelledby="today-moment-card-title"><p className="eyebrow"><CradleIcon name="family" size="sm" decorative /> Today’s Moment</p>
+    {moment ? <><h2 id="today-moment-card-title">{moment.title}</h2><p>{moment.description}</p><div className="together-meta"><span>{participantContext(moment.participants)}</span><span>{moment.durationMinutes} minutes</span></div><div className="row-actions"><button className="primary" disabled={busy} onClick={() => navigate("together")}>View Moment</button>{!["completed", "skipped", "swapped", "saved_for_later"].includes(moment.status) && <button disabled={busy} onClick={() => void act("swap")}>Try another</button>}</div></> : <><h2 id="today-moment-card-title">No Moment chosen for today.</h2><p>Give your household something positive to look forward to.</p><div className="row-actions"><button className="primary" onClick={() => navigate("together")}>Surprise us</button><button onClick={() => navigate("together")}>Choose a Moment</button></div></>}
+  </section>;
 }
 
 export { Navigation };
