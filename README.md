@@ -2,9 +2,15 @@
 
 Cradle is a Household Operating System. This repository is being rebuilt in small validated slices.
 
-## Current Phase
+## Current state
 
-Phase 4.3 refines the dashboard-first household experience:
+Cradle is preparing for the private Household Alpha, building on the completed
+Phase 4.3 dashboard-first household experience. The current deployment model is
+a Cloudflare Worker with Vite static assets, D1 persistence and Supabase
+authentication. Alpha is isolated from production through its own Worker
+environment and D1 database.
+
+Phase 4.3 foundation:
 
 - secure PIN-based household and profile sign-in
 - server-managed, revocable sessions
@@ -20,7 +26,8 @@ Phase 4.3 refines the dashboard-first household experience:
 - personalised Dashboard, `/me`, member-owned cat avatars, and collaborative household suggestions
 - an app-wide no-dead-end navigation and recovery standard
 
-Generated tasks or executions, actionable Today’s Mission work, and automatic assignment remain for later phases.
+Historical phase notes remain in the product and architecture documentation;
+the current implementation phase is Household Alpha readiness.
 
 ## Run Locally
 
@@ -36,11 +43,11 @@ Start the Vite frontend:
 npm run dev
 ```
 
-Build and preview through Cloudflare Pages Functions:
+Build and run the Cloudflare Worker locally:
 
 ```bash
 npm run build
-npm run preview:cloudflare
+npm run dev:worker
 ```
 
 ## Database
@@ -93,4 +100,6 @@ git status --short
 
 ## Production D1
 
-`wrangler.toml` contains a placeholder D1 `database_id`. Replace it later with the real Cloudflare D1 database ID through production deployment configuration. Do not commit secrets or live credentials.
+`wrangler.toml` contains distinct placeholder D1 IDs for Production and Alpha.
+Replace each with its real Cloudflare D1 ID in the corresponding Cloudflare
+deployment configuration before use. Do not commit secrets or live credentials.

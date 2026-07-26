@@ -73,4 +73,4 @@ Typed not-found, archived and permission errors do not reveal another tenant’s
 
 ## Engineering checklist
 
-Tests cover onboarding exits, completion to Dashboard, the expanded and compact home-setup states, family completion choices, invitation result actions, invitation error exits, acceptance destination, My Cradle return, avatar and suggestion outcomes, Schedule empty/create/permission paths, empty-state CTAs, session recovery, dismissible sheets, canonical navigation and invitation/onboarding precedence. The Pages smoke exercises the authoritative routes and persists each completed state.
+Tests cover onboarding exits, completion to Dashboard, the expanded and compact home-setup states, family completion choices, invitation result actions, invitation error exits, acceptance destination, My Cradle return, avatar and suggestion outcomes, Schedule empty/create/permission paths, empty-state CTAs, session recovery, dismissible sheets, canonical navigation and invitation/onboarding precedence. The Worker smoke exercises the authoritative routes and persists each completed state.

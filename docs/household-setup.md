@@ -28,7 +28,7 @@ Migrations `0007` and `0008` are additive. The former deactivates only legacy sy
 
 ## Local review reliability
 
-No service worker is registered, and API responses use `Cache-Control: no-store`. Keep `npm run dev:pages` attached and verify that its `workerd` child owns port 8788 before review. Do not treat an arbitrary listener as authoritative.
+No service worker is registered, and API responses use `Cache-Control: no-store`. Keep `npm run dev:worker` attached and verify that its `workerd` child owns the local review port before review. Do not treat an arbitrary listener as authoritative.
 
 In development only, every API response includes `X-Cradle-Dev-Runtime-ID`. A changed ID stops stale state and shows **Cradle has restarted during development.** with Reload. If a local D1 reset invalidates an authenticated session, Cradle clears local onboarding/session state, explains the reset, and returns to Create Household.
 

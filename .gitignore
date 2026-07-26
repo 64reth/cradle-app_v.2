@@ -10,4 +10,5 @@ coverage/
 .wrangler/
 .mf/
 .dev.vars
+.dev.vars.*
 npm-debug.log*
