@@ -69,23 +69,25 @@ describe("API envelopes", () => {
   it("adds a runtime ID only to development API responses and clears a reset session cookie", async () => {
     const development = await developmentMiddleware({
       request: new Request("http://localhost:8788/api/auth/session"),
-      env: { APP_ENV: "development" },
+      env: { APP_ENV: "development", APP_VERSION: "0.1.0" },
       next: async () => new Response(JSON.stringify({ ok: false }), { status: 401 })
     });
     expect(development.headers.get("X-Cradle-Dev-Runtime-ID")).toEqual(expect.any(String));
+    expect(development.headers.get("X-Cradle-App-Version")).toBe("0.1.0");
     expect(development.headers.get("Set-Cookie")).toContain("cradle_session=; ");
     const health = await developmentMiddleware({
       request: new Request("http://localhost:8788/health"),
-      env: { APP_ENV: "development" },
+      env: { APP_ENV: "development", APP_VERSION: "0.1.0" },
       next: async () => success({ status: "ok" }, "health-request")
     });
     expect(health.headers.get("X-Cradle-Dev-Runtime-ID")).toBe(development.headers.get("X-Cradle-Dev-Runtime-ID"));
 
     const production = await developmentMiddleware({
       request: new Request("https://cradle.test/api/auth/session"),
-      env: { APP_ENV: "production" },
+      env: { APP_ENV: "production", APP_VERSION: "0.1.0" },
       next: async () => success({ ready: true }, "production-request")
     });
     expect(production.headers.get("X-Cradle-Dev-Runtime-ID")).toBeNull();
+    expect(production.headers.get("X-Cradle-App-Version")).toBe("0.1.0");
   });
 });

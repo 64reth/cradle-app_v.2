@@ -47,3 +47,7 @@ Member/invitation policy is centralised in the server family-access module. Hous
 Routine management begins only after setup is complete. Every active real person in Family Status is available to assignment selectors. A Household admin chooses the persisted Rotation or Shared-team subset. Choosing responsibility does not grant management permission. Age band informs safe defaults only.
 
 Calendar access is server-enforced. Leadership events use leadership-only visibility and return no data to ordinary Members. Adults can manage only ordinary events they created. Children have household-visible read access only.
+
+## Platform Operator
+
+Platform Operator is a separate operations identity, not a household role and never a substitute for Owner or Household admin. It is granted only through the protected `platform_operators` table. Operators can inspect safe account/provider/membership metadata, revoke sessions, suspend or restore accounts, and review safe authentication/diagnostics summaries. They cannot read household task, meal, schedule, profile-detail or feedback content. Every platform action is recorded in the immutable platform audit log.

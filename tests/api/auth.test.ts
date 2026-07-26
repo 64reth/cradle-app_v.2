@@ -40,6 +40,11 @@ describe("authentication primitives", () => {
     expect(clearCookie({ APP_ENV: "development" })).toContain("Max-Age=0");
   });
 
+  it("keeps Secure cookies enabled in the Alpha runtime", () => {
+    expect(cookie("secret", { APP_ENV: "alpha" })).toContain("; Secure");
+    expect(clearCookie({ APP_ENV: "alpha" })).toContain("; Secure");
+  });
+
   it("centralises invitation role policy", () => {
     expect(() => requireInvitationPermission({ role: "adult" } as never)).toThrow(/allowed/);
     expect(() => requireInvitationPermission({ role: "child" } as never)).toThrow(/allowed/);

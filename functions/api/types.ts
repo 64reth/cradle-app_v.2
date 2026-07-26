@@ -2,6 +2,10 @@ export type CradleEnv = {
   DB?: D1Database;
   APP_ENV?: string;
   API_VERSION?: string;
+  APP_VERSION?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  SUPABASE_REDIRECT_URL?: string;
 };
 
 export type ApiSuccess<T> = {

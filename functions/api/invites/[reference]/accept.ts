@@ -1,6 +1,7 @@
 import { cookie, createSession, hashPin, verifyPin } from "../../auth";
 import { ApiError, conflictError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success, validationError } from "../../http";
 import { accountFields, findPublicInvite, publicInviteState } from "../../invites";
+import { recordAuthEvent } from "../../auth-provider";
 import type { CradleEnv } from "../../types";
 
 type Context = { request: Request; env: CradleEnv; params: { reference: string } };
@@ -22,6 +23,8 @@ export async function onRequestPost({ request, env, params }: Context) {
         throw conflictError("This invitation has already been accepted.");
       }
       const session = await createSession(db, rawInvite.householdId, rawInvite.targetMemberId, rawInvite.acceptedAccountId);
+      await recordAuthEvent(db, { accountId: rawInvite.acceptedAccountId, householdId: rawInvite.householdId,
+        memberId: rawInvite.targetMemberId, eventName: "invitation_accepted", result: "success", requestId });
       return success({ accepted: true, repeated: true, destination: "/dashboard" }, requestId, {
         headers: { "Set-Cookie": cookie(session.token, env) }
       });
@@ -60,7 +63,15 @@ export async function onRequestPost({ request, env, params }: Context) {
         }
         throw error;
       }
+      try {
+        await db.prepare("INSERT OR IGNORE INTO profiles (account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+          .bind(accountId, fields.displayName, now, now).run();
+        await db.prepare("INSERT OR IGNORE INTO profile_preferences (account_id, preferences_json, created_at, updated_at) VALUES (?, '{}', ?, ?)")
+          .bind(accountId, now, now).run();
+      } catch { /* Profiles are introduced additively; legacy acceptance remains compatible. */ }
       const session = await createSession(db, invite.householdId, invite.targetMemberId, accountId);
+      await recordAuthEvent(db, { accountId, householdId: invite.householdId, memberId: invite.targetMemberId,
+        eventName: "invitation_accepted", result: "success", requestId });
       return success({ accepted: true, repeated: false, destination: "/dashboard" }, requestId, {
         status: 201, headers: { "Set-Cookie": cookie(session.token, env) }
       });
@@ -114,6 +125,15 @@ export async function onRequestPost({ request, env, params }: Context) {
     if (results[joinIndex].meta.changes !== 1 || results[joinIndex + 1].meta.changes !== 1) {
       throw conflictError("This invitation changed while the request was being sent. Ask for a new invitation.");
     }
+    if (!existingAccount) {
+      try {
+        await db.prepare("INSERT OR IGNORE INTO profiles (account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+          .bind(accountId, fields.displayName, now, now).run();
+        await db.prepare("INSERT OR IGNORE INTO profile_preferences (account_id, preferences_json, created_at, updated_at) VALUES (?, '{}', ?, ?)")
+          .bind(accountId, now, now).run();
+      } catch { /* Compatibility with databases before the operations migration. */ }
+    }
+    await recordAuthEvent(db, { accountId, householdId: invite.householdId, eventName: "invitation_accepted", result: "success", requestId });
     return success({ joinRequested: true, repeated: false, destination: "/" }, requestId, { status: 202 });
   });
 }

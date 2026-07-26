@@ -1,6 +1,6 @@
 # API Foundation
 
-Pages Functions return typed JSON envelopes.
+The Worker API returns typed JSON envelopes.
 
 Success:
 
@@ -44,3 +44,10 @@ Meal planning endpoints are household-scoped behind the session cookie:
 - `GET/POST /api/household/meal-plans` and `GET/PATCH /api/household/meal-plans/:planId` for dated weekly plans and explicit overrides.
 
 Weekly changes use `editScope: "this_week"`, `"special_occasion"` or `"repeating_rotation"`; the last option is the only one that changes the reusable source slot.
+
+Authentication and operations routes:
+
+- `POST /api/auth/supabase/exchange` verifies a Supabase access token server-side, creates/links a Profile identity and starts an opaque identity session; it never creates a household automatically;
+- `GET /api/auth/sessions`, `POST /api/auth/session/refresh` and `POST /api/auth/sessions/revoke-all` expose safe session management;
+- `GET /api/ops/accounts` and `GET/POST /api/ops/accounts/:accountId` are restricted to Platform Operators and return only safe account/provider/membership metadata;
+- `GET /api/alpha/diagnostics` remains restricted to Household admins and never returns private feedback content.

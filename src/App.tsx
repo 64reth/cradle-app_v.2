@@ -21,6 +21,11 @@ import { FamilyAvatar } from "./FamilyAvatar";
 import { memberAvatar, type MemberAvatar } from "../shared/member-avatar";
 import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
+import { AlphaFeedback } from "./AlphaFeedback";
+import { trackAlphaEvent } from "./alphaDiagnostics";
+import { SupabaseAuthActions } from "./SupabaseAuthActions";
+import { completeSupabaseOAuth } from "./supabaseAuth";
+import { Operations } from "./Operations";
 
 type Role = "owner" | "parent_admin" | "adult" | "child";
 type Step = "leadership" | "members" | "companion" | "rooms" | "pets" | "review" | "complete";
@@ -44,6 +49,7 @@ const viewFromPath = (path: string): AuthenticatedView =>
       path === "/schedule" || path === "/calendar" ? "calendar" :
       path === "/meals" ? "meals" :
       path === "/together" ? "together" :
+      path === "/operations" ? "operations" :
       path === "/me" ? "me" : "dashboard";
 const pathForView = (view: AuthenticatedView) =>
   view === "systems" ? "/routines" : view === "calendar" ? "/schedule" : `/${view}`;
@@ -80,7 +86,7 @@ function PublicForm({ view, onDone, onBack, notice }: { view: Exclude<View, "hom
       {view === "create" && <Field label="Owner display name" name="displayName" />}
       {view !== "join" && <Field label="PIN (4–12 digits)" name="pin" type="password" />}
       {view === "create" && <Field label="Confirm PIN" name="pinConfirmation" type="password" />}
-      <ErrorMessage value={error} /><button className="primary" disabled={busy}>{busy ? "Working…" : labels[view]}</button>
+      <ErrorMessage value={error} />{view === "sign-in" && <SupabaseAuthActions onComplete={onDone} />}<button className="primary" disabled={busy}>{busy ? "Working…" : labels[view]}</button>
     </form></section>;
 }
 
@@ -299,11 +305,24 @@ export function App() {
       setState(reason instanceof TransportError ? "network" : "problem");
     }
   }, [clearDevelopmentSession]);
+  useEffect(() => {
+    if (!window.location.search.includes("code=")) return;
+    void completeSupabaseOAuth().then((completed) => {
+      if (completed) { window.history.replaceState({}, "", "/"); void load(); }
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : "That sign-in could not be completed."));
+  }, [load]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const pop = () => setHouseholdView(viewFromPath(window.location.pathname));
     window.addEventListener("popstate", pop); return () => window.removeEventListener("popstate", pop);
   }, []);
+  useEffect(() => {
+    if (state === "ready") {
+      const view = viewFromPath(window.location.pathname);
+      const screen = !dashboard ? "onboarding" : view === "systems" ? "routines" : view === "calendar" ? "schedule" : view === "me" ? "my_cradle" : view === "operations" ? "unknown" : view;
+      trackAlphaEvent({ name: "screen_viewed", screen });
+    }
+  }, [dashboard, householdView, state]);
   const refreshSetup = useCallback(async () => { setSetup(await api<Setup>("/api/household/setup")); }, []);
   const navigateHousehold = useCallback((next: AuthenticatedView) => {
     if (next !== "me") setPersonalMemberId(undefined);
@@ -332,7 +351,7 @@ export function App() {
       <button onClick={() => { clearDevelopmentSession(); setState("public"); setView("sign-in"); }}>Return to sign in</button></div></section></main>;
   if (state === "ready" && session && dashboard) {
     const currentMember = dashboard.members.find(({ id }) => id === dashboard.currentUser.id);
-    if (!currentMember?.avatarId) return <main className="app-shell"><section className="card stage avatar-onboarding-stage">
+    if (!currentMember?.avatarId) return <main className="app-shell"><AlphaFeedback screen="onboarding" /><section className="card stage avatar-onboarding-stage">
       <AvatarCreator name={currentMember?.preferredName || currentMember?.displayName || dashboard.currentUser.displayName}
         title={`Welcome, ${currentMember?.preferredName || currentMember?.displayName || dashboard.currentUser.displayName}.`}
         description="Before you continue, make a cat that feels like you. You can change it later in My Cradle."
@@ -342,13 +361,15 @@ export function App() {
         }} />
       <button onClick={() => void signOut()}>Save for later and sign out</button>
     </section></main>;
-    return <main className="dashboard-app">{householdView === "systems"
+    const feedbackScreen = householdView === "systems" ? "routines" : householdView === "calendar" ? "schedule" : householdView === "meals" ? "meals" : householdView === "together" ? "together" : householdView === "me" ? "my_cradle" : "dashboard";
+    return <main className="dashboard-app"><AlphaFeedback screen={feedbackScreen} />{householdView === "systems"
       ? <SystemsLibrary navigate={navigateHousehold} signOut={() => void signOut()}
         addRoutine={() => { setDashboardSetupRequested(true); navigateHousehold("dashboard"); }} />
       : householdView === "calendar" ? <HouseholdCalendar dashboard={dashboard} navigate={navigateHousehold}
         signOut={() => void signOut()} onDashboardChanged={setDashboard} />
       : householdView === "meals" ? <Meals navigate={navigateHousehold} signOut={() => void signOut()} />
       : householdView === "together" ? <Together navigate={navigateHousehold} signOut={() => void signOut()} />
+      : householdView === "operations" ? <Operations navigate={navigateHousehold} signOut={() => void signOut()} />
       : householdView === "me" ? <PersonalArea dashboard={dashboard} navigate={navigateHousehold} signOut={() => void signOut()}
         startSuggestion={suggestionRequested} onSuggestionOpened={() => setSuggestionRequested(false)}
         onDashboardChanged={setDashboard} memberId={personalMemberId} />
@@ -359,9 +380,9 @@ export function App() {
         openPersonalMember={(memberId) => { setPersonalMemberId(memberId); navigateHousehold("me"); }} />}</main>;
   }
   if (state === "ready" && session && setup) {
-    if (!setup.canConfigure) return <main className="app-shell"><section className="card stage"><p className="eyebrow">Setup in progress</p><h1>Your household lead is setting things up.</h1>
+    if (!setup.canConfigure) return <main className="app-shell"><AlphaFeedback screen="onboarding" /><section className="card stage"><p className="eyebrow">Setup in progress</p><h1>Your household lead is setting things up.</h1>
       <p>You can return when the Owner has completed the household foundation.</p><button onClick={signOut}>Sign out</button></section></main>;
-    return <main className="app-shell"><div className="setup-safe-nav"><Progress step={setup.state.step} />
+    return <main className="app-shell"><AlphaFeedback screen="onboarding" /><div className="setup-safe-nav"><Progress step={setup.state.step} />
       <button onClick={() => void signOut()}>Save and sign out</button></div><ErrorMessage value={error} />
       {setup.state.step === "leadership" && <Leadership setup={setup} advance={() => transition("/api/household/setup/leadership")} />}
       {setup.state.step === "members" && <MembersStage setup={setup} refresh={refreshSetup} advance={() => transition("/api/household/setup/members-complete")} />}

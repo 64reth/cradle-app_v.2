@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { onRequestGet } from "../../functions/health";
 
-type HealthEnvelope = { ok: boolean; data?: { service: string; status: string; function: string; database: string; apiVersion: string }; error?: { code: string; message: string }; requestId: string };
+type HealthEnvelope = { ok: boolean; data?: { service: string; status: string; function: string; database: string; apiVersion: string; appVersion: string }; error?: { code: string; message: string }; requestId: string };
 
 async function responseBody(response: Response): Promise<HealthEnvelope> {
   return await response.json() as HealthEnvelope;
@@ -19,14 +19,14 @@ describe("health endpoint", () => {
   it("returns success when the D1 binding responds", async () => {
     const response = await onRequestGet({
       request: new Request("https://cradle.test/health", { headers: { "CF-Ray": "ray_123" } }),
-      env: { DB: mockD1(), API_VERSION: "v1" }
+      env: { DB: mockD1(), API_VERSION: "v1", APP_VERSION: "0.1.0" }
     });
     const body = await responseBody(response);
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
       ok: true,
-      data: { service: "cradle", status: "ok", function: "ok", database: "ok", apiVersion: "v1" },
+      data: { service: "cradle", status: "ok", function: "ok", database: "ok", apiVersion: "v1", appVersion: "0.1.0" },
       requestId: "ray_123"
     });
   });

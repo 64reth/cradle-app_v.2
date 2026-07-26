@@ -82,8 +82,13 @@ export function pinField(body: JsonRecord): string {
 }
 
 export function cookie(token: string, env: CradleEnv, maxAge = SESSION_MAX_AGE): string {
-  const secure = env.APP_ENV === "production" ? "; Secure" : "";
+  const secure = secureCookieSuffix(env);
   return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure}`;
+}
+
+/** Local Wrangler development uses HTTP; every deployed runtime is HTTPS. */
+export function secureCookieSuffix(env: CradleEnv): string {
+  return env.APP_ENV === "development" ? "" : "; Secure";
 }
 
 export function clearCookie(env: CradleEnv): string {
@@ -96,17 +101,24 @@ function cookieValue(request: Request): string | null {
 }
 
 export async function createSession(
-  db: D1Database, householdId: string, memberId: string, accountId: string | null = null
+  db: D1Database, householdId: string, memberId: string, accountId: string | null = null,
+  authMethod: "legacy_pin" | "google" | "apple" | "email_otp" = "legacy_pin"
 ): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken();
   const tokenHash = await sha256(token);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE * 1000).toISOString();
+  const sessionId = crypto.randomUUID();
   await db.prepare(
     `INSERT INTO sessions
       (id, household_id, member_id, token_hash, expires_at, created_at, updated_at, revoked_at, account_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`
-  ).bind(crypto.randomUUID(), householdId, memberId, tokenHash, expiresAt, now.toISOString(), now.toISOString(), accountId).run();
+  ).bind(sessionId, householdId, memberId, tokenHash, expiresAt, now.toISOString(), now.toISOString(), accountId).run();
+  try {
+    await db.prepare(`INSERT OR REPLACE INTO session_metadata
+      (household_id, session_id, auth_method, last_seen_at) VALUES (?, ?, ?, ?)`)
+      .bind(householdId, sessionId, authMethod, now.toISOString()).run();
+  } catch { /* Compatibility with a database before the additive operations migration. */ }
   return { token, expiresAt };
 }
 

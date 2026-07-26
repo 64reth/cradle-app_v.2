@@ -7,6 +7,7 @@ type HealthData = {
   function: "ok";
   database: "ok";
   apiVersion: string;
+  appVersion: string;
 };
 
 export async function onRequestGet(context: { request: Request; env: CradleEnv }): Promise<Response> {
@@ -20,7 +21,8 @@ export async function onRequestGet(context: { request: Request; env: CradleEnv }
         status: "ok",
         function: "ok",
         database: "ok",
-        apiVersion: context.env.API_VERSION || "v1"
+        apiVersion: context.env.API_VERSION || "v1",
+        appVersion: context.env.APP_VERSION || "0.1.0"
       },
       requestId
     );

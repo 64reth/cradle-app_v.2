@@ -24,7 +24,9 @@ beforeEach(() => {
     readFileSync("migrations/0008_family_assignments_and_daily_tasks.sql", "utf8") +
     readFileSync("migrations/0009_meal_rotation_and_weekly_plans.sql", "utf8") +
     readFileSync("migrations/0010_together.sql", "utf8") +
-    readFileSync("migrations/0011_together_swap_indexes.sql", "utf8");
+    readFileSync("migrations/0011_together_swap_indexes.sql", "utf8") +
+    readFileSync("migrations/0012_alpha_diagnostics.sql", "utf8") +
+    readFileSync("migrations/0013_authentication_operations.sql", "utf8");
   writeFileSync(join(workspace, "migration.sql"), migration);
   sqlite(migration);
 });
@@ -34,19 +36,17 @@ afterEach(() => {
 });
 
 describe("authentication migration", () => {
-  it("applies all eleven additive migrations and operational domain tables", () => {
+  it("applies all thirteen additive migrations and operational domain tables", () => {
     const tables = sqlite("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       .trim()
       .split("\n");
 
-    expect(tables).toEqual(["authentication_attempts", "companions", "household_event_members", "household_events",
-      "household_invites", "household_join_requests",
-      "household_system_participants", "household_system_steps", "household_systems",
-      "household_task_instances", "household_task_participants", "households",
-      "invitation_codes", "meal_favourites", "meal_ingredients", "meal_rotation_slots", "meal_rotations",
-      "meal_shopping_list_items", "meal_shopping_lists", "meals", "member_companions", "member_meal_preferences", "members", "pets", "room_occupants", "rooms",
-      "routine_assignment_history", "routine_assignment_participants", "routine_assignments",
-      "sessions", "task_help_requests", "task_suggestions", "together_daily_moments", "together_member_preferences",
+    expect(tables).toEqual(["account_security", "alpha_diagnostic_events", "alpha_feedback", "auth_events", "auth_identities", "authentication_attempts", "companions", "household_event_members", "household_events",
+      "household_invites", "household_join_requests", "household_system_participants", "household_system_steps", "household_systems",
+      "household_task_instances", "household_task_participants", "households", "identity_sessions", "invitation_codes",
+      "meal_favourites", "meal_ingredients", "meal_rotation_slots", "meal_rotations", "meal_shopping_list_items", "meal_shopping_lists", "meals",
+      "member_companions", "member_meal_preferences", "members", "pets", "platform_audit_log", "platform_operators", "profile_preferences", "profiles",
+      "room_occupants", "rooms", "routine_assignment_history", "routine_assignment_participants", "routine_assignments", "session_metadata", "sessions", "task_help_requests", "task_suggestions", "together_daily_moments", "together_member_preferences",
       "together_memories", "together_moment_history", "together_moment_participants", "together_moment_templates",
       "together_tradition_participants", "together_traditions", "user_accounts",
       "weekly_meal_plan_slots", "weekly_meal_plans"]);
@@ -225,6 +225,31 @@ describe("authentication migration", () => {
     expect(migration).toContain("CREATE TABLE household_task_instances");
     expect(sqlite(`SELECT access_level || '|' || age_band FROM members
       WHERE role = 'owner' LIMIT 1;`).trim()).toBe("");
+  });
+
+  it("keeps alpha diagnostics additive and household-scoped", () => {
+    const migration = readFileSync("migrations/0012_alpha_diagnostics.sql", "utf8");
+    expect(migration).not.toMatch(/^\s*(DROP|DELETE\s+FROM|UPDATE)\b/im);
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS alpha_diagnostic_events");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS alpha_feedback");
+    expect(migration).toContain("FOREIGN KEY (household_id, member_id)");
+  });
+
+  it("keeps authentication and operations records additive and audit records immutable", () => {
+    const migration = readFileSync("migrations/0013_authentication_operations.sql", "utf8");
+    expect(migration).not.toMatch(/^\s*(DROP|DELETE\s+FROM)\b/im);
+    expect(migration).toContain("CREATE TABLE auth_identities");
+    expect(migration).toContain("CREATE TABLE platform_operators");
+    expect(migration).toContain("platform_audit_log_immutable_update");
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES ('ops-home', 'Ops Home', 'now', 'now');
+      INSERT INTO user_accounts (id, account_reference, display_name, pin_hash, pin_salt, created_at, updated_at)
+        VALUES ('ops-account', 'ops-ref', 'Operator', 'hash', 'salt', 'now', 'now');
+      INSERT INTO platform_operators (account_id, created_at, updated_at) VALUES ('ops-account', 'now', 'now');
+      INSERT INTO platform_audit_log (id, operator_account_id, action, result, created_at)
+        VALUES ('audit', 'ops-account', 'view_account', 'success', 'now');
+    `);
+    expect(() => sqlite("UPDATE platform_audit_log SET action = 'changed' WHERE id = 'audit';")).toThrow();
   });
 
   it("keeps migration 0009 additive and models the 7x4 rotation separately from weekly plans", () => {

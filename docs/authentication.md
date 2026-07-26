@@ -2,7 +2,7 @@
 
 ## Account, Member and session separation
 
-Authentication decisions happen in Pages Functions. A `user_account` is the credential-bearing identity; a household `Member` is the durable person-in-the-home profile. Managed and unclaimed Members intentionally have no account or session. A Member with access links to at most one account, and an account can claim at most one Member in a household.
+Authentication decisions happen in the Cloudflare Worker handlers. A `user_account` is the credential-bearing identity; a household `Member` is the durable person-in-the-home profile. Managed and unclaimed Members intentionally have no account or session. A Member with access links to at most one account, and an account can claim at most one Member in a household.
 
 The browser receives an opaque bearer token in an HTTP-only cookie. D1 stores only its SHA-256 hash. Every protected request resolves one active, unexpired, unrevoked session and derives the account, household, Member and role from it. Protected queries use that derived household ID and ignore client-supplied identity.
 
@@ -16,7 +16,7 @@ PINs are 4–12 digits. They use a 16-byte cryptographically random salt and Web
 
 Session tokens contain 32 random bytes and last 30 days. Missing, expired, revoked, suspended-Member and left-Member sessions fail closed. Sign-out revokes the exact session and clears the cookie. Suspending a Member revokes that Member’s open sessions.
 
-`cradle_session` uses `HttpOnly`, `SameSite=Lax`, `Path=/`, and explicit `Max-Age`. Production adds `Secure`. Local Pages development uses HTTP, so `Secure` is omitted only outside production; JavaScript still cannot read the cookie.
+`cradle_session` uses `HttpOnly`, `SameSite=Lax`, `Path=/`, and explicit `Max-Age`. Every deployed runtime, including Alpha (`APP_ENV=alpha`), adds `Secure`. Only local Worker development (`APP_ENV=development`) omits it for HTTP; JavaScript still cannot read the cookie.
 
 ## Invitations
 
@@ -46,7 +46,7 @@ Server authorization is centralized in the family-access policy. Parent/Admin ca
 
 Failed sign-ins are keyed by a hash of connecting IP, household reference and profile reference. Five failures in a 15-minute window block that key for 15 minutes; success clears it. Production should supplement this D1-compatible mechanism with Cloudflare rate limiting and monitoring.
 
-This phase has no recovery, OAuth, email delivery, passkeys, session-management UI or distributed abuse controls. Invitation delivery uses explicit copy, QR and platform Share actions rather than pretending an email was sent.
+The legacy PIN route remains for migration compatibility only. Provider sign-in, identity sessions, safe session listing/revocation, alpha authentication events and the Platform Operator foundation are described in [Authentication and operations](./authentication-operations.md). Passwords, password reset, passkeys and required MFA remain out of scope.
 
 ## Routes and local development
 
@@ -57,4 +57,4 @@ This phase has no recovery, OAuth, email delivery, passkeys, session-management 
 - Invitations: `GET|POST /api/household/invites`; revoke and regenerate actions under `/:inviteId`
 - Join requests: `GET /api/household/join-requests`; approve and decline actions under `/:requestId`
 
-All responses use typed no-store envelopes with request IDs. Development responses also expose the runtime/build identifier used to detect a restarted local runtime. Run `npm run build`, `npm run db:reset:local`, `npm run db:migrate`, then `npm run dev:pages`. Local D1 state is ignored under `.wrangler/`.
+All responses use typed no-store envelopes with request IDs. Development responses also expose the runtime/build identifier used to detect a restarted local runtime. Run `npm run build`, `npm run db:reset:local`, `npm run db:migrate`, then `npm run dev:worker`. Local D1 state is ignored under `.wrangler/`.

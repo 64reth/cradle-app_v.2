@@ -21,15 +21,18 @@ export function requestId(request: Request): string {
 }
 
 export function json<T>(body: ApiEnvelope<T>, init: ResponseInit = {}): Response {
+  const headers = new Headers(jsonHeaders);
+  new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
   return Response.json(body, {
     ...init,
-    headers: { ...jsonHeaders, ...(init.headers || {}) }
+    headers
   });
 }
 
 export function success<T>(data: T, id: string, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers || {}); headers.set("X-Request-ID", id);
   return json({ ok: true, data, requestId: id }, {
-    ...init, headers: { ...(init.headers || {}), "X-Request-ID": id }
+    ...init, headers
   });
 }
 

@@ -7,6 +7,9 @@ import { onRequestPost as createPet } from "../../functions/api/household/pets/i
 import { onRequestDelete as deletePet, onRequestPatch as updatePet } from "../../functions/api/household/pets/[petId]";
 import { PET_TYPE_VALUES } from "../../shared/pets";
 import { onRequestPost as createRoom } from "../../functions/api/household/rooms/index";
+import { onRequestPost as alphaEvent } from "../../functions/api/alpha/events";
+import { onRequestPost as alphaFeedback } from "../../functions/api/alpha/feedback";
+import { onRequestGet as alphaDiagnostics } from "../../functions/api/alpha/diagnostics";
 
 type Identity = { sessionId: string; householdId: string; householdName: string; householdReference: string;
   memberId: string; displayName: string; profileReference: string; role: string; expiresAt: string;
@@ -38,6 +41,30 @@ const owner: Identity = { sessionId: "session-a", householdId: "house-a", househ
   role: "owner", expiresAt: "2999-01-01", setupStatus: "incomplete", setupStep: "pets" };
 
 describe("protected Phase 3 routes", () => {
+  it("stores privacy-safe alpha events under the authenticated household", async () => {
+    const { db, calls } = mockDb(owner);
+    const response = await alphaEvent({ request: request("/api/alpha/events", {
+      method: "POST", body: JSON.stringify({ name: "api_error", screen: "dashboard", action: "sign_off", message: "secret" })
+    }), env: { DB: db, APP_VERSION: "0.1.0" } });
+    expect(response.status).toBe(202);
+    const insert = calls.find(({ sql }) => sql.includes("INSERT INTO alpha_diagnostic_events"));
+    expect(insert?.values).toContain("house-a");
+    expect(insert?.values).toContain("owner-a");
+    expect(insert?.values).not.toContain("secret");
+  });
+
+  it("accepts explicit feedback and restricts diagnostics reads to admins", async () => {
+    const { db, calls } = mockDb(owner);
+    const feedback = await alphaFeedback({ request: request("/api/alpha/feedback", {
+      method: "POST", body: JSON.stringify({ category: "confusion", screen: "meals", message: "The review step was unclear." })
+    }), env: { DB: db, APP_VERSION: "0.1.0" } });
+    expect(feedback.status).toBe(201);
+    expect(calls.find(({ sql }) => sql.includes("INSERT INTO alpha_feedback"))?.values).toContain("house-a");
+    const diagnostics = await alphaDiagnostics({ request: request("/api/alpha/diagnostics"), env: { DB: db } });
+    expect(diagnostics.status).toBe(200);
+    const member = mockDb({ ...owner, role: "adult" });
+    expect((await alphaDiagnostics({ request: request("/api/alpha/diagnostics"), env: { DB: member.db } })).status).toBe(403);
+  });
   it("ignores forged identity and scopes member queries to the session household", async () => {
     const { db, calls } = mockDb(owner, [{ displayName: "Alex", profileReference: "alex", role: "owner" }]);
     const response = await membersRoute({ request: request("/api/household/members?household_id=house-b"), env: { DB: db } });

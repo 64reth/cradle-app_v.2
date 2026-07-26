@@ -1,5 +1,6 @@
 import { checkThrottle, clearFailures, cookie, createSession, pinField, recordFailure, textField, throttleKey, verifyPin } from "../auth";
 import { ApiError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success } from "../http";
+import { recordAuthEvent } from "../auth-provider";
 import type { CradleEnv } from "../types";
 
 type Context = { request: Request; env: CradleEnv };
@@ -26,10 +27,13 @@ export async function onRequestPost({ request, env }: Context): Promise<Response
     if (!member || !member.isActive || ["suspended", "left"].includes(member.lifecycleState) ||
       !member.pinHash || !member.pinSalt || !(await verifyPin(pin, member.pinSalt, member.pinHash))) {
       await recordFailure(db, key);
+      await recordAuthEvent(db, { eventName: "login_failure", provider: "legacy_pin", result: "failure", safeCode: "INVALID_CREDENTIALS", requestId });
       throw invalid();
     }
     await clearFailures(db, key);
     const session = await createSession(db, member.householdId, member.id, member.accountId);
+    await recordAuthEvent(db, { accountId: member.accountId, householdId: member.householdId, memberId: member.id,
+      eventName: "login_success", provider: "legacy_pin", result: "success", requestId });
     return success({ expiresAt: session.expiresAt }, requestId, { headers: { "Set-Cookie": cookie(session.token, env) } });
   });
 }

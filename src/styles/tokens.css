@@ -7,6 +7,90 @@
   --colour-sky: #72c9f4;
   --colour-coral: #ff806d;
   --colour-lilac: #b69cff;
+
+  /* Semantic aliases keep the approved palette stable while giving each use a
+     clear meaning. The appearance tokens above remain the source palette for
+     avatar and module styling. */
+  --colour-canvas: var(--colour-paper);
+  --colour-surface: #ffffff;
+  --colour-surface-elevated: var(--colour-surface);
+  --colour-surface-muted: #f5f1e8;
+  --colour-surface-selected: #e7f8f4;
+  --colour-surface-selected-strong: #effcf3;
+  --colour-surface-track: #e7e7e2;
+  --colour-surface-disabled: var(--colour-state-disabled);
+  --colour-surface-translucent: rgba(255, 255, 255, .72);
+  --colour-cream: var(--colour-paper);
+
+  --colour-text-primary: var(--colour-ink);
+  --colour-text-secondary: #454545;
+  /* This darker neutral remains subordinate on light surfaces; stronger
+     accents use text-on-accent instead. */
+  --colour-text-muted: #454545;
+  --colour-text-disabled: #454545;
+  --colour-text-on-accent: var(--colour-ink);
+  --colour-muted-ink: var(--colour-text-muted);
+
+  --colour-border-subtle: var(--colour-ink);
+  --colour-border: var(--colour-ink);
+  --colour-border-strong: var(--colour-ink);
+  --colour-shadow: var(--colour-ink);
+  --colour-focus-inner: var(--colour-sky);
+  --colour-focus-outer: var(--colour-ink);
+  --colour-hover: #f6fbff;
+
+  --colour-action-primary: var(--colour-mint);
+  --colour-action-primary-hover: var(--colour-mint);
+  --colour-action-primary-pressed: var(--colour-mint);
+  --colour-action-secondary: var(--colour-surface);
+  --colour-action-secondary-hover: var(--colour-hover);
+  --colour-action-secondary-pressed: var(--colour-surface-selected);
+  --colour-action-danger: var(--colour-state-error);
+  --colour-action-danger-hover: var(--colour-state-error);
+  --colour-module-dashboard: var(--colour-sky);
+  --colour-module-dashboard-surface: var(--colour-module-dashboard);
+  --colour-module-profile: var(--colour-lilac);
+  --colour-module-profile-surface: var(--colour-module-profile);
+  --colour-module-meals: var(--colour-sky);
+  --colour-module-meals-surface: var(--colour-module-meals);
+  --colour-module-together: var(--colour-lilac);
+  --colour-module-together-surface: var(--colour-module-together);
+  --colour-module-schedule: var(--colour-mint);
+  --colour-module-schedule-surface: var(--colour-module-schedule);
+  --colour-module-routines: var(--colour-sun);
+  --colour-module-routines-surface: var(--colour-module-routines);
+  --colour-state-success: var(--colour-mint);
+  --colour-state-success-surface: var(--colour-state-success);
+  --colour-state-warning: var(--colour-sun);
+  --colour-state-warning-surface: var(--colour-state-warning);
+  --colour-state-error: var(--colour-coral);
+  --colour-state-error-surface: var(--colour-state-error);
+  --colour-state-info: var(--colour-sky);
+  /* Informational notices retain their existing mint surface for now; the
+     separate alias leaves room for a later visual refinement. */
+  --colour-state-info-surface: var(--colour-mint);
+  --colour-state-active: var(--colour-mint);
+  --colour-state-draft: var(--colour-sun);
+  --colour-state-paused: var(--colour-lilac);
+  --colour-state-archived: var(--colour-surface-track);
+  --colour-state-selected-surface: var(--colour-surface-selected);
+  --colour-state-selected: var(--colour-state-selected-surface);
+  --colour-state-active-navigation: var(--colour-sun);
+  --colour-state-complete: var(--colour-mint);
+  --colour-state-disabled: var(--colour-surface-track);
+  --colour-state-overdue: var(--colour-coral);
+  --colour-state-away: var(--colour-surface-muted);
+  --colour-state-flexible: var(--colour-paper);
+  --colour-state-needs-help: var(--colour-sun);
+  --colour-state-assigned: var(--colour-surface);
+  --colour-state-unassigned: var(--colour-surface-muted);
+  --colour-state-waiting: var(--colour-sun);
+  --colour-state-missed: var(--colour-state-overdue);
+  --colour-progress-positive: #3ca66b;
+  --colour-progress-steady: #bfd447;
+  --colour-progress-attention: #efa52f;
+  --colour-progress-support: #ee6f55;
+  --colour-illustration-highlight: var(--colour-surface);
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -15,6 +99,10 @@
   --space-8: 2rem;
   --radius-card: 16px;
   --border-width: 2px;
-  --shadow-brutal: 0 4px 0 var(--colour-ink);
+  --shadow-button: 0 3px 0 var(--colour-shadow);
+  --shadow-card: 0 5px 0 var(--colour-shadow);
+  --shadow-card-raised: 0 6px 0 var(--colour-shadow);
+  --shadow-dialog: 10px 10px 0 var(--colour-shadow);
+  --shadow-brutal: 0 4px 0 var(--colour-shadow);
   --font-family: "Arial Rounded MT Bold", "Trebuchet MS", ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

@@ -105,3 +105,18 @@ Meal suggestions read favourites for every active member and retain the member r
 Additive migrations `0010_together.sql` and `0011_together_swap_indexes.sql` add system/household Moment templates, household-local daily Moment projections, participant snapshots and lifecycle history, optional member preferences, Traditions, Tradition participants and memories. Partial profile data is allowed. Active-slot unique indexes enforce one primary and at most one secondary Moment per household/date while allowing swapped history to remain preserved; all participant, Tradition and memory references are tenant-scoped.
 
 Hobbies and Interests extend the existing `together_member_preferences.interests_json` field rather than adding a duplicate preference table. The field stores a household-member-owned JSON array with stable entry ID, name, optional category, level, setting, participation preference, note and active state. The `/api/me/interests` handlers validate and tenant-scope every read/write. Archiving or deleting an entry changes future suggestion input only; completed Moment snapshots and history remain intact.
+
+## Authentication and operations
+
+Additive migration `0013_authentication_operations.sql` adds the provider and support foundation without replacing existing membership records:
+
+- `profiles` and `profile_preferences` represent a provider-authenticated Cradle identity and safe defaults;
+- `auth_identities` links one identity to Google, Apple or email provider subjects (Apple relay email is not used as the stable key);
+- `identity_sessions` stores opaque pre-household sessions;
+- `account_security` stores account status and future MFA enablement without changing the historical `user_accounts` shape;
+- `session_metadata` stores safe auth method/device timing beside legacy sessions;
+- `platform_operators` is a separate, controlled operations role;
+- `auth_events` stores allowlisted authentication outcomes without secrets;
+- `platform_audit_log` is append-only and protected by immutable database triggers.
+
+Provider identity never grants household access. Active membership and access level continue to be resolved from canonical `members` rows and server-authenticated sessions. All operations queries are account-scoped and do not return private household content.

@@ -13,7 +13,7 @@ import type { TogetherMoment } from "../shared/together";
 import { participantContext } from "../shared/together";
 import { AnimatePresence, MotionButtonFeedback, MotionList, MotionListItem, MotionPage } from "./motion";
 
-export type AuthenticatedView = "dashboard" | "systems" | "calendar" | "me" | "meals" | "together";
+export type AuthenticatedView = "dashboard" | "systems" | "calendar" | "me" | "meals" | "together" | "operations";
 export type DashboardMember = {
   id: string; displayName: string; preferredName?: string | null; role: string;
   accessLevel?: string; ageBand?: string; ageGroup?: string | null;
@@ -483,7 +483,7 @@ export function Dashboard({ data, setData, navigate, signOut, startSetup = false
                 <span className="mission-assignees">{mission.participants.length ? `For ${mission.participants.map(({ memberName }) => memberName).join(", ")}` : "Unassigned"}</span></div>
               <div className="mission-row-actions">{mission.state === "complete" ? <span className="task-state complete"><CradleIcon name="complete" size="sm" decorative /> Complete</span>
                 : canComplete ? <MotionButtonFeedback className="primary" disabled={missionBusy === mission.id} onClick={() => void completeMission(mission)}>{missionBusy === mission.id ? "Saving…" : "Sign off"}</MotionButtonFeedback>
-                : <span className="task-state">{mission.state === "waiting_for_team" ? "Waiting for team" : "Assigned"}</span>}
+                : <span className={`task-state ${mission.state === "waiting_for_team" ? "waiting_for_team" : mission.participants.length ? "assigned" : "unassigned"}`}>{mission.state === "waiting_for_team" ? "Waiting for team" : mission.participants.length ? "Assigned" : "Unassigned"}</span>}
                 {currentParticipant && mission.state !== "complete" && <button className="mission-help-button" onClick={() => navigate("me")}><CradleIcon name="help" size="sm" decorative /> Need a hand?</button>}</div>
             </article></MotionListItem>;
           })}</AnimatePresence>
