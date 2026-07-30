@@ -1,5 +1,5 @@
 import { ApiError, authorizationError } from "./http";
-import { authenticate, randomToken, secureCookieSuffix, sha256 } from "./auth";
+import { authenticate, randomToken, secureCookieSuffix, sha256, slug } from "./auth";
 import type { CradleEnv } from "./types";
 
 export const IDENTITY_COOKIE = "cradle_identity";
@@ -114,3 +114,93 @@ export function providerIdentity(user: SupabaseUser): { provider: AuthProvider; 
 }
 
 export type ProviderIdentity = ReturnType<typeof providerIdentity>;
+
+type ProviderAccount = { id: string; status: string };
+
+export type ProviderAccountSync = {
+  account: ProviderAccount;
+  external: ProviderIdentity;
+  profileCreated: boolean;
+};
+
+function isUniqueConstraint(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  return message.includes("unique constraint") || message.includes("constraint failed");
+}
+
+async function findProviderAccount(db: D1Database, external: ProviderIdentity): Promise<{ id: string; status: string; identityId: string } | null> {
+  return db.prepare(`SELECT a.id, COALESCE(s.account_status, 'active') AS status, i.id AS identityId
+    FROM auth_identities i JOIN user_accounts a ON a.id = i.account_id
+    LEFT JOIN account_security s ON s.account_id = a.id
+    WHERE i.provider = ? AND i.provider_subject = ? LIMIT 1`)
+    .bind(external.provider, external.subject)
+    .first<{ id: string; status: string; identityId: string }>();
+}
+
+/**
+ * Synchronise a verified provider identity into Cradle's existing account
+ * model. Provider subjects are the only stable lookup key; email is metadata,
+ * never an implicit account-linking key.
+ */
+export async function synchroniseProviderAccount(db: D1Database, user: SupabaseUser): Promise<ProviderAccountSync> {
+  const external = providerIdentity(user);
+  const now = new Date().toISOString();
+  let existing = await findProviderAccount(db, external);
+  if (existing) {
+    const displayName = accountDisplayName(user);
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO account_security (account_id, account_status, created_at, updated_at) VALUES (?, 'active', ?, ?)")
+        .bind(existing.id, now, now),
+      db.prepare("INSERT OR IGNORE INTO profiles (account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind(existing.id, displayName, now, now),
+      db.prepare("INSERT OR IGNORE INTO profile_preferences (account_id, preferences_json, created_at, updated_at) VALUES (?, '{}', ?, ?)")
+        .bind(existing.id, now, now),
+      db.prepare("UPDATE auth_identities SET email = ?, last_seen_at = ? WHERE id = ?")
+        .bind(external.email, now, existing.identityId)
+    ]);
+    return { account: { id: existing.id, status: existing.status }, external, profileCreated: false };
+  }
+
+  const accountId = crypto.randomUUID();
+  const accountReference = `${slug(external.email?.split("@")[0] || "profile") || "profile"}-${crypto.randomUUID().slice(0, 8)}`;
+  const profileName = accountDisplayName(user);
+  const pinHash = randomToken();
+  const pinSalt = randomToken(16);
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO user_accounts
+        (id, account_reference, display_name, pin_hash, pin_salt, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?)`)
+        .bind(accountId, accountReference, profileName, pinHash, pinSalt, now, now),
+      db.prepare("INSERT INTO account_security (account_id, account_status, created_at, updated_at) VALUES (?, 'active', ?, ?)")
+        .bind(accountId, now, now),
+      db.prepare("INSERT INTO profiles (account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind(accountId, profileName, now, now),
+      db.prepare("INSERT INTO profile_preferences (account_id, preferences_json, created_at, updated_at) VALUES (?, '{}', ?, ?)")
+        .bind(accountId, now, now),
+      db.prepare(`INSERT INTO auth_identities
+        (id, account_id, provider, provider_subject, email, created_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), accountId, external.provider, external.subject, external.email, now, now)
+    ]);
+    return { account: { id: accountId, status: "active" }, external, profileCreated: true };
+  } catch (error) {
+    // Two tabs may complete the same OAuth callback together. D1's unique
+    // provider-subject index is authoritative; recover by loading that row
+    // instead of creating a second Cradle account.
+    if (!isUniqueConstraint(error)) throw error;
+    existing = await findProviderAccount(db, external);
+    if (!existing) throw error;
+    await db.batch([
+      db.prepare("INSERT OR IGNORE INTO account_security (account_id, account_status, created_at, updated_at) VALUES (?, 'active', ?, ?)")
+        .bind(existing.id, now, now),
+      db.prepare("INSERT OR IGNORE INTO profiles (account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind(existing.id, profileName, now, now),
+      db.prepare("INSERT OR IGNORE INTO profile_preferences (account_id, preferences_json, created_at, updated_at) VALUES (?, '{}', ?, ?)")
+        .bind(existing.id, now, now),
+      db.prepare("UPDATE auth_identities SET email = ?, last_seen_at = ? WHERE id = ?")
+        .bind(external.email, now, existing.identityId)
+    ]);
+    return { account: { id: existing.id, status: existing.status }, external, profileCreated: false };
+  }
+}
