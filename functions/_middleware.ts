@@ -18,14 +18,17 @@ export async function onRequest(context: Context): Promise<Response> {
   const apiResponse = url.pathname.startsWith("/api/") || url.pathname === "/health";
   if (!apiResponse) return response;
 
-  const headers = new Headers(response.headers);
-  headers.set(versionHeader, context.env.APP_VERSION || "0.1.0");
+  // API handlers create their own Responses, so their headers are mutable.
+  // Mutating that response keeps Set-Cookie as a first-class response header;
+  // rebuilding the response here risks folding or dropping it at the Worker
+  // adapter boundary.
+  response.headers.set(versionHeader, context.env.APP_VERSION || "0.1.0");
   if (context.env.APP_ENV === "development") {
     developmentRuntimeId ||= crypto.randomUUID();
-    headers.set(runtimeHeader, developmentRuntimeId);
+    response.headers.set(runtimeHeader, developmentRuntimeId);
   }
   if (context.env.APP_ENV === "development" && url.pathname === "/api/auth/session" && response.status === 401) {
-    headers.set("Set-Cookie", clearCookie(context.env));
+    response.headers.set("Set-Cookie", clearCookie(context.env));
   }
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return response;
 }
