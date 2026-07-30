@@ -24,7 +24,7 @@ import { CradleIcon } from "./components/ui/CradleIcon";
 import { AlphaFeedback } from "./AlphaFeedback";
 import { trackAlphaEvent } from "./alphaDiagnostics";
 import { SupabaseAuthActions } from "./SupabaseAuthActions";
-import { completeSupabaseOAuth } from "./supabaseAuth";
+import { completeSupabaseOAuth, hasSupabaseOAuthCallback } from "./supabaseAuth";
 import { Operations } from "./Operations";
 
 type Role = "owner" | "parent_admin" | "adult" | "child";
@@ -305,7 +305,7 @@ export function App() {
     }
   }, [clearDevelopmentSession]);
   useEffect(() => {
-    const isOAuthCallback = window.location.search.includes("code=");
+    const isOAuthCallback = hasSupabaseOAuthCallback();
     let cancelled = false;
     if (isOAuthCallback) {
       // Do not race the provider exchange with /api/auth/session. A fresh

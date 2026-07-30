@@ -38,6 +38,14 @@ function mockState(step: string, role = "owner", canConfigure = true, pets: obje
 }
 afterEach(() => { vi.restoreAllMocks(); window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); });
 describe("household onboarding", () => {
+  it("shows a recoverable message when Supabase rejects the OAuth state", async () => {
+    window.history.replaceState({}, "", "/?error=invalid_request&error_code=bad_oauth_state");
+    render(<App />);
+
+    expect(await screen.findByText(/Close other Cradle sign-in tabs and try once more/i)).toBeInTheDocument();
+    expect(screen.queryByText("Opening Cradle…")).not.toBeInTheDocument();
+  });
+
   it("still renders public entry", async () => {
     vi.stubGlobal("fetch", vi.fn(() => response(401, { ok: false, error: { message: "Sign in" } }))); render(<App />);
     expect(await screen.findByRole("button", { name: "Create Household" })).toBeInTheDocument();

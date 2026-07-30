@@ -1,10 +1,11 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ApiResponseError, TransportError, type Envelope } from "./api";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const redirectUrl = import.meta.env.VITE_SUPABASE_REDIRECT_URL as string | undefined;
-const verifierKey = "cradle-supabase-pkce-verifier";
-const stateKey = "cradle-supabase-oauth-state";
+const storageKey = "cradle-supabase-auth";
+let client: SupabaseClient | undefined;
 
 export type SupabaseExchangeResult = {
   profileCreated: boolean;
@@ -43,18 +44,20 @@ function configured(): { url: string; key: string } {
   return { url: supabaseUrl.replace(/\/$/, ""), key: supabaseAnonKey };
 }
 
-function bytes(size: number): Uint8Array {
-  const value = new Uint8Array(size); crypto.getRandomValues(value); return value;
-}
-
-function base64Url(value: ArrayBuffer | Uint8Array): string {
-  const bytesValue = value instanceof Uint8Array ? value : new Uint8Array(value);
-  let binary = ""; bytesValue.forEach((item) => { binary += String.fromCharCode(item); });
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function challenge(verifier: string): Promise<string> {
-  return base64Url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+function supabase(): SupabaseClient {
+  if (client) return client;
+  const { url, key } = configured();
+  client = createClient(url, key, {
+    auth: {
+      storage: window.sessionStorage,
+      storageKey,
+      flowType: "pkce",
+      detectSessionInUrl: false,
+      persistSession: true,
+      autoRefreshToken: false,
+    },
+  });
+  return client;
 }
 
 function safeRedirect(): string {
@@ -68,46 +71,54 @@ function safeRedirect(): string {
 }
 
 export async function startSupabaseOAuth(provider: "google" | "apple"): Promise<void> {
-  const { url } = configured(); const verifier = base64Url(bytes(32)); const state = base64Url(bytes(24));
-  window.sessionStorage.setItem(verifierKey, verifier); window.sessionStorage.setItem(stateKey, state);
-  const params = new URLSearchParams({ provider, redirect_to: safeRedirect(), code_challenge: await challenge(verifier), code_challenge_method: "S256", state });
-  window.location.assign(`${url}/auth/v1/authorize?${params.toString()}`);
+  const { error } = await supabase().auth.signInWithOAuth({
+    provider,
+    options: { redirectTo: safeRedirect() },
+  });
+  if (error) throw error;
 }
 
 export async function requestSupabaseOtp(email: string): Promise<void> {
-  const { url, key } = configured();
-  const response = await fetch(`${url}/auth/v1/otp`, { method: "POST", headers: { apikey: key, "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim(), create_user: true }) });
-  if (!response.ok) throw new Error("We couldn’t send that code. Check the email address and try again.");
-}
-
-async function providerRequest(path: string, body: object): Promise<{ access_token?: string }> {
-  const { url, key } = configured();
-  let response: Response;
-  try {
-    response = await fetch(`${url}${path}`, { method: "POST", headers: { apikey: key, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  } catch {
-    throw new TransportError("Cradle couldn’t connect");
-  }
-  if (!response.ok) throw new Error("That code could not be verified. Please try again.");
-  return await response.json() as { access_token?: string };
+  const { error } = await supabase().auth.signInWithOtp({
+    email: email.trim(),
+    options: { shouldCreateUser: true },
+  });
+  if (error) throw new Error("We couldn’t send that code. Check the email address and try again.");
 }
 
 export async function verifySupabaseOtp(email: string, token: string): Promise<void> {
-  const result = await providerRequest("/auth/v1/verify", { type: "email", email: email.trim(), token: token.trim() });
-  if (!result.access_token) throw new Error("That code could not be verified. Please try again.");
-  await exchangeSupabaseAccessToken(result.access_token);
+  const { data, error } = await supabase().auth.verifyOtp({
+    type: "email",
+    email: email.trim(),
+    token: token.trim(),
+  });
+  if (error || !data.session?.access_token) throw new Error("That code could not be verified. Please try again.");
+  await exchangeSupabaseAccessToken(data.session.access_token);
+}
+
+export function hasSupabaseOAuthCallback(location = window.location.href): boolean {
+  const params = new URL(location).searchParams;
+  return params.has("code") || params.has("error") || params.has("error_code");
+}
+
+function callbackError(params: URLSearchParams): Error | null {
+  const code = params.get("error_code") || params.get("error");
+  if (!code) return null;
+  if (code === "bad_oauth_state") {
+    return new Error("That Google sign-in could not be verified. Close other Cradle sign-in tabs and try once more.");
+  }
+  return new Error(params.get("error_description") || "That sign-in could not be completed. Please try again.");
 }
 
 export async function completeSupabaseOAuth(): Promise<SupabaseExchangeResult | null> {
-  const code = new URL(window.location.href).searchParams.get("code");
+  const params = new URL(window.location.href).searchParams;
+  const providerError = callbackError(params);
+  if (providerError) throw providerError;
+  const code = params.get("code");
   if (!code) return null;
-  const verifier = window.sessionStorage.getItem(verifierKey); const expectedState = window.sessionStorage.getItem(stateKey);
-  const state = new URL(window.location.href).searchParams.get("state");
-  if (!verifier || !expectedState || state !== expectedState) throw new Error("That sign-in link is no longer valid. Please try again.");
-  const result = await providerRequest("/auth/v1/token?grant_type=pkce", { auth_code: code, code_verifier: verifier });
-  if (!result.access_token) throw new Error("That sign-in could not be completed. Please try again.");
-  const exchange = await exchangeSupabaseAccessToken(result.access_token);
-  window.sessionStorage.removeItem(verifierKey); window.sessionStorage.removeItem(stateKey);
+  const { data, error } = await supabase().auth.exchangeCodeForSession(code);
+  if (error || !data.session?.access_token) throw new Error("That sign-in could not be completed. Please try again.");
+  const exchange = await exchangeSupabaseAccessToken(data.session.access_token);
   return exchange;
 }
 
