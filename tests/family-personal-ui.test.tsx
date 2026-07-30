@@ -50,6 +50,58 @@ describe("family and personal user journeys", () => {
     expect(radios[1]).not.toBeChecked();
   });
 
+  it("keeps every relationship state on member cards with an onward action and no Invitations panel", async () => {
+    const statefulMembers: DashboardData["members"] = [
+      owner,
+      { ...gillian, id: "paused", displayName: "Paused Pat", lifecycleState: "suspended", hasAccount: 1 },
+      { ...gillian, id: "paused-stale", displayName: "Paused Stale",
+        lifecycleState: "suspended", hasAccount: 1, invitationStatus: "revoked", inviteId: "stale-paused" },
+      { ...gillian, id: "joined-stale", displayName: "Joined Stale",
+        lifecycleState: "active", hasAccount: 1, invitationStatus: "revoked", inviteId: "stale-joined" },
+      { ...gillian, id: "ready", displayName: "Ready Riley" },
+      { ...gillian, id: "pending", displayName: "Pending Penny", lifecycleState: "invited",
+        inviteId: "invite-pending", invitationStatus: "pending", inviteExpiresAt: "2999-01-01" },
+      { ...gillian, id: "revoked", displayName: "Revoked Robin",
+        inviteId: "invite-revoked", invitationStatus: "revoked", inviteExpiresAt: "2999-01-01" },
+      child,
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/household/members") {
+        return response(200, { ok: true, data: { members: statefulMembers } });
+      }
+      if (path === "/api/household/join-requests") return response(200, { ok: true, data: { requests: [] } });
+      return response(200, { ok: true, data: { suggestions: [] } });
+    }));
+
+    render(<FamilyPanel dashboard={{ ...dashboard, members: statefulMembers }}
+      onClose={vi.fn()} onChanged={vi.fn()} />);
+
+    expect((await screen.findAllByText("Access paused")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Ready to invite")).toBeInTheDocument();
+    expect(screen.getByText("Invitation sent")).toBeInTheDocument();
+    expect(screen.getByText("Invitation revoked")).toBeInTheDocument();
+    expect(screen.getByText("Managed by household leaders")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Restore access" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Invite again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resend" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Invitations" })).not.toBeInTheDocument();
+    const pausedStale = screen.getByText("Paused Stale").closest("article");
+    expect(within(pausedStale!).getByText("Access paused")).toBeInTheDocument();
+    expect(within(pausedStale!).queryByText("Invitation revoked")).not.toBeInTheDocument();
+    expect(within(pausedStale!).queryByRole("button", { name: "Invite again" })).not.toBeInTheDocument();
+    const joinedStale = screen.getByText("Joined Stale").closest("article");
+    expect(within(joinedStale!).getByText("Joined Cradle")).toBeInTheDocument();
+    expect(within(joinedStale!).queryByText("Invitation revoked")).not.toBeInTheDocument();
+    expect(within(joinedStale!).queryByRole("button", { name: "Invite again" })).not.toBeInTheDocument();
+    for (const name of ["Paused Pat", "Ready Riley", "Pending Penny", "Revoked Robin", "Taryn"]) {
+      const card = screen.getByText(name).closest("article");
+      expect(card).not.toBeNull();
+      expect(within(card!).getAllByRole("button").length).toBeGreaterThan(0);
+    }
+  });
+
   it("shows an honest Family Status and management action only to leadership", () => {
     const { rerender } = render(<Dashboard data={dashboard} setData={vi.fn()} navigate={vi.fn()} signOut={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Gillian: Waiting to join" })).toBeInTheDocument();
@@ -221,12 +273,11 @@ describe("family and personal user journeys", () => {
       ? response(201, { ok: true, data: { accepted: true, destination: "/dashboard" } })
       : response(200, { ok: true, data: { invitation: {
         householdName: "Fox House", inviteType: "profile", targetMemberId: "gillian", targetName: "Gillian",
-        role: "parent_admin", expiresAt: "2999", alreadyAccepted: false, availableProfiles: []
+        role: "parent_admin", expiresAt: "2999", alreadyAccepted: false, identityAuthenticated: true, availableProfiles: []
       } } })));
     render(<InvitationPage reference="private" accepted={accepted} goHome={vi.fn()} />);
-    fireEvent.change(await screen.findByLabelText("Create a PIN"), { target: { value: "4829" } });
-    fireEvent.change(screen.getByLabelText("Confirm PIN"), { target: { value: "4829" } });
-    fireEvent.click(screen.getByRole("button", { name: "Join household" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Join household" }));
     await waitFor(() => expect(accepted).toHaveBeenCalled());
+    expect(screen.queryByLabelText(/PIN/i)).not.toBeInTheDocument();
   });
 });

@@ -4,7 +4,6 @@ import { COMPANION_EXPRESSIONS } from "../shared/companion";
 import { memberAvatar, type MemberAvatar } from "../shared/member-avatar";
 import {
   MEMBER_ACCESS_LEVELS, MEMBER_AGE_BANDS, accessLevelLabel, ageBandLabel,
-  lifecycleLabel, type MemberLifecycleState
 } from "../shared/members";
 import { api, failureMessage, jsonInit } from "./api";
 import { FamilyAvatar } from "./FamilyAvatar";
@@ -39,6 +38,28 @@ const avatarFor = (member: DashboardMember): MemberAvatar => memberAvatar({
   expressionKey: member.avatarExpressionKey || undefined
 });
 
+type MemberRelationshipState =
+  "joined" | "paused" | "managed" | "invite_pending" | "invite_expired" | "invite_revoked" | "ready";
+
+function deriveMemberRelationshipState(member: DashboardMember): MemberRelationshipState {
+  if (member.hasAccount) return member.lifecycleState === "suspended" ? "paused" : "joined";
+  if (memberAccess(member) === "managed_member") return "managed";
+  if (member.invitationStatus === "pending") return "invite_pending";
+  if (member.invitationStatus === "expired") return "invite_expired";
+  if (member.invitationStatus === "revoked") return "invite_revoked";
+  return "ready";
+}
+
+const memberStatusLabels: Record<MemberRelationshipState, string> = {
+  joined: "Joined Cradle",
+  paused: "Access paused",
+  managed: "Managed by household leaders",
+  invite_pending: "Invitation sent",
+  invite_expired: "Invitation expired",
+  invite_revoked: "Invitation revoked",
+  ready: "Ready to invite",
+};
+
 export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: {
   dashboard: DashboardData; onClose: () => void; onChanged: (data: DashboardData) => void;
   initialMemberId?: string;
@@ -47,7 +68,6 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
     initialMemberId ? "manage" : "overview"
   );
   const [members, setMembers] = useState<DashboardMember[]>(dashboard.members);
-  const [invites, setInvites] = useState<Invite[]>([]);
   const [requests, setRequests] = useState<JoinRequest[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState(initialMemberId || "");
@@ -66,13 +86,12 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
 
   const load = useCallback(async () => {
     try {
-      const [family, invitationData, requestData, suggestionData] = await Promise.all([
+      const [family, requestData, suggestionData] = await Promise.all([
         api<{ members: DashboardMember[] }>("/api/household/members"),
-        api<{ invites: Invite[] }>("/api/household/invites"),
         api<{ requests: JoinRequest[] }>("/api/household/join-requests"),
         api<{ suggestions: Suggestion[] }>("/api/household/task-suggestions")
       ]);
-      setMembers(family.members); setInvites(invitationData.invites); setRequests(requestData.requests);
+      setMembers(family.members); setRequests(requestData.requests);
       setSuggestions(suggestionData.suggestions);
     } catch (reason) { setError(failureMessage(reason)); }
   }, []);
@@ -193,6 +212,16 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
     } catch (reason) { setError(failureMessage(reason)); }
     finally { setBusy(false); }
   }
+  async function restoreMember(memberId = selectedMemberId) {
+    if (!memberId) return;
+    setBusy(true); setError("");
+    try {
+      await api(`/api/household/members/${memberId}/restore`, jsonInit("POST"));
+      setNotice("Access restored. They can sign in again with their provider.");
+      setMode("overview"); await load(); await refreshDashboard();
+    } catch (reason) { setError(failureMessage(reason)); }
+    finally { setBusy(false); }
+  }
   async function saveManagedAvatar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); const form = new FormData(event.currentTarget);
     if (!managedAvatar) { setBusy(false); return; }
@@ -212,6 +241,11 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
   const selectedAvatar = managedAvatar || (selectedMember ? avatarFor(selectedMember) : null);
   const mayManage = (member: DashboardMember) => dashboard.currentUser.role === "owner" ||
     memberAccess(member) === "managed_member";
+  const memberInvite = (member: DashboardMember): Invite | null => member.inviteId ? {
+    id: member.inviteId, targetMemberId: member.id, targetName: member.displayName, inviteType: "profile",
+    role: member.role, expiresAt: member.inviteExpiresAt || "", status:
+      member.invitationStatus === "pending" ? "active" : member.invitationStatus || "expired"
+  } : null;
 
   return <section className="family-panel" aria-labelledby="family-panel-title">
     <div className="setup-panel-heading"><div><p className="eyebrow">Dashboard → Family</p>
@@ -225,23 +259,28 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
 
     {mode === "overview" && <div className="family-management-grid">
       <section className="dashboard-card"><h2>Family members</h2>
-        <div className="family-manage-list">{members.map((member) => <article key={member.id}>
+        <div className="family-manage-list">{members.map((member) => {
+          const relationshipState = deriveMemberRelationshipState(member);
+          return <article key={member.id}>
           <FamilyAvatar name={member.preferredName || member.displayName} avatar={avatarFor(member)} /><div><strong>{member.preferredName || member.displayName}</strong>
-            <small>{accessLevelLabel(memberAccess(member))} · {ageBandLabel(memberAgeBand(member))} · {
-              lifecycleLabel(member.lifecycleState as MemberLifecycleState)}</small></div>
+            <small>{accessLevelLabel(memberAccess(member))} · {ageBandLabel(memberAgeBand(member))}</small>
+            <small><strong>Status:</strong> {memberStatusLabels[relationshipState]}</small></div>
           {member.role !== "owner" && mayManage(member) &&
             <button onClick={() => { setSelectedMemberId(member.id); setManagedAvatar(avatarFor(member)); setMode("manage"); }}>Manage</button>}
-          {!member.hasAccount && member.role !== "owner" && <button onClick={() => { setSelectedMemberId(member.id); setMode("invite"); }}>Invite</button>}
-        </article>)}</div>
+          {relationshipState === "paused" && member.role !== "owner" && mayManage(member) &&
+            <button disabled={busy} onClick={() => void restoreMember(member.id)}>Restore access</button>}
+          {relationshipState === "ready" && member.role !== "owner" &&
+            <button onClick={() => { setSelectedMemberId(member.id); setMode("invite"); }}>Invite</button>}
+          {(relationshipState === "invite_expired" || relationshipState === "invite_revoked") &&
+            memberInvite(member) && <button disabled={busy} onClick={() => void regenerate(memberInvite(member)!)}>
+              Invite again</button>}
+          {relationshipState === "invite_pending" && memberInvite(member) &&
+            <div className="row-actions"><button disabled={busy} onClick={() => void regenerate(memberInvite(member)!)}>Resend</button>
+              <button disabled={busy} onClick={() => void revoke(member.inviteId!)}>Revoke</button></div>}
+        </article>;
+        })}</div>
         <div className="row-actions"><button className="primary" onClick={() => { setNewMemberKey(clientKey()); setNewAccessLevel("household_member"); setMode("add"); }}><CradleIcon name="add" size="sm" decorative /> Add family member</button>
           <button onClick={() => { setSelectedMemberId(""); setMode("invite"); }}>General invite</button><button onClick={onClose}>Done</button></div></section>
-      <section className="dashboard-card"><h2>Invitations</h2>
-        {!invites.length && <div className="empty-action"><p>No invitations are waiting.</p>
-          <button onClick={() => setMode("invite")}>Invite family</button><button onClick={onClose}>Back to Dashboard</button></div>}
-        {invites.map((invite) => <article className="invite-row" key={invite.id}><div><strong>{invite.targetName || "Household invitation"}</strong>
-          <small>{invite.status} · expires {new Date(invite.expiresAt).toLocaleDateString()}</small></div>
-          {invite.status === "active" && <div className="row-actions"><button disabled={busy} onClick={() => void regenerate(invite)}>Resend</button>
-            <button disabled={busy} onClick={() => void revoke(invite.id)}>Revoke</button></div>}</article>)}</section>
       <section className="dashboard-card"><h2>Join requests</h2>
         {!requests.length && <div className="empty-action"><p>No join requests are waiting.</p><button onClick={onClose}>Back to Dashboard</button></div>}
         {requests.map((request) => <article className="join-request" key={request.id}><p><strong>{request.displayName}</strong> wants to join
@@ -304,7 +343,9 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
           <small>Age describes suitable controls and suggestions. It never grants admin access.</small></label>
         <div className="row-actions"><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
           <button type="button" onClick={() => setMode("overview")}>Cancel</button><button type="button" onClick={onClose}>Back to Dashboard</button></div>
-        {!["suspended", "left"].includes(selectedMember.lifecycleState || "") &&
+        {selectedMember.lifecycleState === "suspended" &&
+          <button className="primary" type="button" disabled={busy} onClick={() => void restoreMember()}>Restore access</button>}
+        {Boolean(selectedMember.hasAccount) && !["suspended", "left"].includes(selectedMember.lifecycleState || "") &&
           <button className="danger-button" type="button" disabled={busy} onClick={() => void suspendMember()}>Pause access</button>}
       </form>
       {canManageAvatar && selectedAvatar && <form className="focused-form dashboard-card" onSubmit={saveManagedAvatar}>

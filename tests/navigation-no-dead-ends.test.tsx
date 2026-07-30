@@ -80,7 +80,7 @@ describe("app-wide no-dead-end policy", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).startsWith("/api/invites/")
       ? response(200, { ok: true, data: { invitation: {
         householdName: "Fox House", inviteType: "profile", targetMemberId: "gillian", targetName: "Gillian",
-        role: "parent_admin", expiresAt: "2999", alreadyAccepted: false, availableProfiles: []
+        role: "parent_admin", expiresAt: "2999", alreadyAccepted: false, identityAuthenticated: false, availableProfiles: []
       } } })
       : response(200, session("leadership"))));
     render(<App />);
@@ -88,6 +88,8 @@ describe("app-wide no-dead-end policy", () => {
     expect(screen.queryByText(/Guide the household/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Return home/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue with Google" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/PIN/i)).not.toBeInTheDocument();
   });
 
   it("opens and dismisses family management without trapping the Dashboard", async () => {
