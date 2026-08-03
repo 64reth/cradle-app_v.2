@@ -26,6 +26,7 @@ const owner: Identity = {
 
 type Options = {
   identity?: Identity | null; existingMember?: object | null; targetMember?: object | null;
+  duplicateMember?: object | null;
   invite?: object | null; account?: object | null; joinRequest?: object | null;
   identityAccount?: object | null;
   oldInvite?: object | null; member?: object | null; room?: object | null; pet?: object | null; batchChanges?: number[];
@@ -48,6 +49,7 @@ function mockDb(options: Options = {}) {
                 : options.identityAccount ?? { accountId: "provider-account", identitySessionId: "provider-session", provider: "google" };
             }
             if (sql.includes("client_key = ?") && sql.includes("FROM members")) return options.existingMember ?? null;
+            if (sql.includes("lower(trim(display_name))")) return options.duplicateMember ?? null;
             if (sql.includes("FROM members") && sql.includes("account_id AS accountId") && sql.includes("is_active = 1")) {
               return options.targetMember ?? null;
             }
@@ -119,7 +121,7 @@ describe("family, invitation and personal APIs", () => {
     expect(insert?.sql).not.toContain("pin_hash");
   });
 
-  it("keeps paused and revoked-invitation members in the authoritative Family list", async () => {
+  it("builds the authoritative Family list from every tenant member with only left-joined optional state", async () => {
     const paused = { id: "gillian", displayName: "Gillian", lifecycleState: "suspended", hasAccount: 1 };
     const revoked = { id: "taryn", displayName: "Taryn", lifecycleState: "unclaimed", hasAccount: 0,
       invitationStatus: "revoked", inviteId: "invite-old" };
@@ -129,8 +131,34 @@ describe("family, invitation and personal APIs", () => {
 
     expect(result.results).toEqual([paused, revoked]);
     const query = calls.find(({ sql }) => sql.includes("WITH latest_invites"))?.sql || "";
-    expect(query).toContain("m.is_active = 1 OR m.lifecycle_state = 'suspended'");
-    expect(query).not.toContain("m.lifecycle_state NOT IN ('left', 'suspended')");
+    expect(query).toContain("FROM members m");
+    expect(query).toContain("LEFT JOIN user_accounts");
+    expect(query).toContain("LEFT JOIN account_security");
+    expect(query).toContain("LEFT JOIN latest_invites");
+    expect(query).toContain("WHERE m.household_id = ?");
+    expect(query).not.toMatch(/WHERE m\.household_id = \? AND/);
+    expect(query).not.toMatch(/m\.is_active\s*=\s*1/);
+  });
+
+  it("returns the existing member reference when duplicate-add detection finds a hidden profile", async () => {
+    const duplicate = { id: "gillian", displayName: "Gillian" };
+    const { db, calls } = mockDb({ duplicateMember: duplicate });
+    const response = await addMember({ request: request("/api/household/members", "POST", {
+      displayName: " gillian ", accessLevel: "household_admin", ageBand: "adult",
+      clientKey: "member-client-duplicate"
+    }), env: { DB: db } });
+    const body = await response.json() as {
+      error: { message: string; details: { existingMemberId: string; existingMemberName: string } }
+    };
+
+    expect(response.status).toBe(409);
+    expect(body.error.message).toContain("Manage their existing profile");
+    expect(body.error.details).toEqual({
+      existingMemberId: "gillian", existingMemberName: "Gillian"
+    });
+    expect(calls.some(({ sql }) => sql.includes("INSERT INTO members"))).toBe(false);
+    const lookup = calls.find(({ sql }) => sql.includes("lower(trim(display_name))"));
+    expect(lookup?.values).toEqual(["house-a", "gillian"]);
   });
 
   it("makes Member creation retry-safe and supports managed Child profiles", async () => {

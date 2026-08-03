@@ -3,13 +3,22 @@ import {
   requestSupabaseOtp, startSupabaseOAuth, supabaseAuthConfigured, verifySupabaseOtp
 } from "./supabaseAuth";
 
-export function SupabaseAuthActions({ onComplete }: { onComplete: () => void }) {
+export function SupabaseAuthActions({ onComplete, onOAuthStart }: {
+  onComplete: () => void;
+  onOAuthStart?: () => void;
+}) {
   const [email, setEmail] = useState(""); const [code, setCode] = useState(""); const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   if (!supabaseAuthConfigured) return null;
   async function oauth(provider: "google" | "apple") {
     setBusy(true); setError("");
-    try { await startSupabaseOAuth(provider); } catch (reason) { setError(reason instanceof Error ? reason.message : "Sign-in is not available right now."); setBusy(false); }
+    try {
+      onOAuthStart?.();
+      await startSupabaseOAuth(provider);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Sign-in is not available right now.");
+      setBusy(false);
+    }
   }
   async function otp() {
     setBusy(true); setError("");

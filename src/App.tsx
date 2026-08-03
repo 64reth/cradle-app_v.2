@@ -24,7 +24,7 @@ import { CradleIcon } from "./components/ui/CradleIcon";
 import { AlphaFeedback } from "./AlphaFeedback";
 import { trackAlphaEvent } from "./alphaDiagnostics";
 import { SupabaseAuthActions } from "./SupabaseAuthActions";
-import { completeSupabaseOAuth, hasSupabaseOAuthCallback } from "./supabaseAuth";
+import { completeSupabaseOAuth, hasSupabaseOAuthCallback, takeSupabaseInvite } from "./supabaseAuth";
 import { Operations } from "./Operations";
 
 type Role = "owner" | "parent_admin" | "adult" | "child";
@@ -314,6 +314,12 @@ export function App() {
       setState("loading");
       void completeSupabaseOAuth().then((result) => {
         if (cancelled || !result) return;
+        const pendingInvite = takeSupabaseInvite();
+        if (pendingInvite) {
+          window.history.replaceState({}, "", `/invite/${encodeURIComponent(pendingInvite)}`);
+          setState("public");
+          return;
+        }
         window.history.replaceState({}, "", "/");
         if (result.householdCount === 0) {
           setDevelopmentResetNotice("Your account is ready. Create your household to continue.");

@@ -87,7 +87,8 @@ export async function dashboardData(db: D1Database, identity: Identity) {
       c.expression_key AS avatarExpressionKey
       FROM members m
       LEFT JOIN member_companions c ON c.household_id = m.household_id AND c.member_id = m.id AND c.is_active = 1
-      WHERE m.household_id = ? AND m.is_active = 1 AND m.lifecycle_state NOT IN ('left', 'suspended')
+      WHERE m.household_id = ? AND (m.is_active = 1 OR m.lifecycle_state = 'suspended')
+        AND m.lifecycle_state != 'left'
       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'parent_admin' THEN 1 WHEN 'adult' THEN 2 ELSE 3 END, m.created_at`)
       .bind(identity.householdId).all<DashboardMember>(),
     db.prepare(`SELECT id, name, room_type AS roomType FROM rooms

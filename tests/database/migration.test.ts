@@ -3,12 +3,37 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { familyMembers } from "../../functions/api/household/members/index";
 
 let workspace = "";
 let dbPath = "";
 
 function sqlite(input: string) {
   return execFileSync("sqlite3", [dbPath], { input, encoding: "utf8" });
+}
+
+function sqliteD1(): D1Database {
+  return {
+    prepare(query: string) {
+      return {
+        bind(...values: unknown[]) {
+          let index = 0;
+          const bound = query.replace(/\?/g, () => {
+            const value = values[index++];
+            if (value === null || value === undefined) return "NULL";
+            if (typeof value === "number") return String(value);
+            return `'${String(value).replaceAll("'", "''")}'`;
+          });
+          return {
+            async all<T>() {
+              const output = sqlite(`.mode json\n${bound};`).trim();
+              return { results: output ? JSON.parse(output) as T[] : [], success: true };
+            }
+          };
+        }
+      };
+    }
+  } as unknown as D1Database;
 }
 
 beforeEach(() => {
@@ -36,6 +61,79 @@ afterEach(() => {
 });
 
 describe("authentication migration", () => {
+  it("returns every household member exactly once when optional account and invitation state is absent or inactive", async () => {
+    sqlite(`
+      INSERT INTO households (id, name, created_at, updated_at) VALUES
+        ('family-home', 'Family Home', '2026-01-01', '2026-01-01'),
+        ('other-home', 'Other Home', '2026-01-01', '2026-01-01');
+      INSERT INTO user_accounts
+        (id, account_reference, display_name, pin_hash, pin_salt, is_active, created_at, updated_at) VALUES
+        ('active-account', 'active-ref', 'Active', 'hash', 'salt', 1, '2026-01-01', '2026-01-01'),
+        ('paused-account', 'paused-ref', 'Paused', 'hash', 'salt', 1, '2026-01-01', '2026-01-01'),
+        ('security-suspended', 'security-ref', 'Security Suspended', 'hash', 'salt', 0, '2026-01-01', '2026-01-01');
+      INSERT INTO account_security (account_id, account_status, created_at, updated_at) VALUES
+        ('active-account', 'active', '2026-01-01', '2026-01-01'),
+        ('paused-account', 'active', '2026-01-01', '2026-01-01'),
+        ('security-suspended', 'suspended', '2026-01-01', '2026-01-01');
+      INSERT INTO members
+        (id, household_id, display_name, role, is_active, created_at, updated_at, profile_reference,
+         account_id, lifecycle_state, access_level, age_band) VALUES
+        ('owner', 'family-home', 'Owner', 'owner', 1, '2026-01-01', '2026-01-01', 'owner',
+          'active-account', 'active', 'household_admin', 'adult'),
+        ('paused', 'family-home', 'Paused Pat', 'adult', 0, '2026-01-02', '2026-01-02', 'paused',
+          'paused-account', 'suspended', 'household_member', 'adult'),
+        ('unclaimed', 'family-home', 'Unclaimed Uma', 'adult', 1, '2026-01-03', '2026-01-03', 'unclaimed',
+          NULL, 'unclaimed', 'household_member', 'adult'),
+        ('pending', 'family-home', 'Pending Penny', 'adult', 1, '2026-01-04', '2026-01-04', 'pending',
+          NULL, 'invited', 'household_member', 'adult'),
+        ('expired', 'family-home', 'Expired Eddie', 'adult', 1, '2026-01-05', '2026-01-05', 'expired',
+          NULL, 'invited', 'household_member', 'adult'),
+        ('gillian', 'family-home', 'Gillian', 'parent_admin', 0, '2026-01-06', '2026-01-06', 'gillian',
+          NULL, 'invited', 'household_admin', 'adult'),
+        ('account-paused', 'family-home', 'Suspended Sam', 'adult', 1, '2026-01-07', '2026-01-07', 'suspended',
+          'security-suspended', 'active', 'household_member', 'adult'),
+        ('managed', 'family-home', 'Managed Mia', 'child', 1, '2026-01-08', '2026-01-08', 'managed',
+          NULL, 'managed', 'managed_member', 'child'),
+        ('left', 'family-home', 'Deactivated Dee', 'adult', 0, '2026-01-09', '2026-01-09', 'left',
+          NULL, 'left', 'household_member', 'adult'),
+        ('other', 'other-home', 'Other Household', 'owner', 1, '2026-01-01', '2026-01-01', 'other',
+          NULL, 'active', 'household_admin', 'adult');
+      INSERT INTO household_invites
+        (id, household_id, target_member_id, token_hash, short_code_hash, invite_type, invited_role,
+         created_by_member_id, expires_at, max_uses, use_count, revoked_at, accepted_at, created_at, updated_at) VALUES
+        ('pending-invite', 'family-home', 'pending', 'pending-token', 'pending-code', 'profile', 'adult',
+          'owner', '2999-01-01', 1, 0, NULL, NULL, '2026-01-10', '2026-01-10'),
+        ('expired-invite', 'family-home', 'expired', 'expired-token', 'expired-code', 'profile', 'adult',
+          'owner', '2020-01-01', 1, 0, NULL, NULL, '2026-01-10', '2026-01-10'),
+        ('revoked-invite', 'family-home', 'gillian', 'revoked-token', 'revoked-code', 'profile', 'parent_admin',
+          'owner', '2999-01-01', 1, 0, '2026-01-11', NULL, '2026-01-11', '2026-01-11');
+    `);
+
+    const result = await familyMembers(sqliteD1(), "family-home");
+    const rows = result.results as Array<Record<string, unknown>>;
+    const ids = rows.map(({ id }) => id);
+
+    expect(ids).toHaveLength(9);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(expect.arrayContaining([
+      "owner", "paused", "unclaimed", "pending", "expired", "gillian",
+      "account-paused", "managed", "left"
+    ]));
+    expect(ids).not.toContain("other");
+    expect(rows.find(({ id }) => id === "pending")?.invitationStatus).toBe("pending");
+    expect(rows.find(({ id }) => id === "expired")?.invitationStatus).toBe("expired");
+    expect(rows.find(({ id }) => id === "gillian")).toMatchObject({
+      displayName: "Gillian", isActive: 0, hasAccount: 0,
+      invitationStatus: "revoked", canInvite: 1
+    });
+    expect(rows.find(({ id }) => id === "account-paused")).toMatchObject({
+      accountIsActive: 0, accountAccessStatus: "suspended", canRestore: 1
+    });
+    expect(rows.find(({ id }) => id === "managed")).toMatchObject({
+      hasAccount: 0, invitationStatus: null
+    });
+  });
+
   it("applies all thirteen additive migrations and operational domain tables", () => {
     const tables = sqlite("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       .trim()

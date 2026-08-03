@@ -17,7 +17,11 @@ export type AuthenticatedView = "dashboard" | "systems" | "calendar" | "me" | "m
 export type DashboardMember = {
   id: string; displayName: string; preferredName?: string | null; role: string;
   accessLevel?: string; ageBand?: string; ageGroup?: string | null;
-  lifecycleState?: string; relationshipLabel?: string | null; hasAccount?: number;
+  lifecycleState?: string; relationshipLabel?: string | null; isActive?: number; hasAccount?: number;
+  accountIsActive?: number | null; accountAccessStatus?: "active" | "suspended" | "closed" | null;
+  canManage?: number; canPause?: number; canRestore?: number; canInvite?: number;
+  inviteId?: string | null; inviteExpiresAt?: string | null;
+  invitationStatus?: "pending" | "accepted" | "expired" | "revoked" | null;
   avatarId?: string | null; avatarFurPaletteKey?: MemberAvatar["furPaletteKey"] | null;
   avatarPatchPrimaryPaletteKey?: MemberAvatar["patchPrimaryPaletteKey"] | null;
   avatarPatchSecondaryPaletteKey?: MemberAvatar["patchSecondaryPaletteKey"] | null;
@@ -283,6 +287,7 @@ function avatarFor(member: DashboardMember, celebrating = false): MemberAvatar {
 }
 
 function familyStatus(member: DashboardMember): string {
+  if (member.lifecycleState === "suspended") return "Access paused";
   if (member.dailyProgress) return member.dailyProgress.status;
   if (member.lifecycleState === "managed") return "Managed profile";
   if (member.lifecycleState === "invited") return "Invite pending";

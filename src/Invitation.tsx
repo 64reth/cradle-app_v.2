@@ -1,10 +1,13 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, failureMessage, jsonInit } from "./api";
 import { CradleIcon } from "./components/ui/CradleIcon";
+import { SupabaseAuthActions } from "./SupabaseAuthActions";
+import { rememberSupabaseInvite } from "./supabaseAuth";
 
 type InvitationData = {
   householdName: string; inviteType: "profile" | "household"; targetMemberId: string | null;
   targetName: string | null; role: string; expiresAt: string; alreadyAccepted: boolean;
+  identityAuthenticated: boolean;
   availableProfiles: Array<{ id: string; displayName: string }>;
 };
 
@@ -14,12 +17,12 @@ export function InvitationPage({ reference, accepted, goHome }: {
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "requested" | "error">("loading");
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const [clientKey] = useState(() => crypto.randomUUID());
+  const [identityAuthenticated, setIdentityAuthenticated] = useState(false);
   const load = useCallback(async () => {
     setState("loading"); setError("");
     try {
       const result = await api<{ invitation: InvitationData }>(`/api/invites/${encodeURIComponent(reference)}`);
-      setInvitation(result.invitation); setState("ready");
+      setInvitation(result.invitation); setIdentityAuthenticated(result.invitation.identityAuthenticated); setState("ready");
     } catch (reason) { setError(failureMessage(reason)); setState("error"); }
   }, [reference]);
   useEffect(() => { void load(); }, [load]);
@@ -28,11 +31,16 @@ export function InvitationPage({ reference, accepted, goHome }: {
     try {
       const result = await api<{ accepted?: boolean; joinRequested?: boolean }>(
         `/api/invites/${encodeURIComponent(reference)}/accept`, jsonInit("POST", {
-          displayName: form.get("displayName"), pin: form.get("pin"), pinConfirmation: form.get("pinConfirmation"),
-          requestedMemberId: form.get("requestedMemberId") || null, clientKey
+          displayName: form.get("displayName"),
+          requestedMemberId: form.get("requestedMemberId") || null,
         }));
       if (result.accepted) await accepted(); else setState("requested");
-    } catch (reason) { setError(failureMessage(reason)); }
+    } catch (reason) {
+      if (reason && typeof reason === "object" && "status" in reason && reason.status === 401) {
+        setIdentityAuthenticated(false);
+      }
+      setError(failureMessage(reason));
+    }
     finally { setBusy(false); }
   }
   if (state === "loading") return <main className="app-shell"><section className="card"><p role="status">Opening your invitation…</p>
@@ -48,17 +56,21 @@ export function InvitationPage({ reference, accepted, goHome }: {
     {invitation?.inviteType === "profile"
       ? <p>This invitation is for <strong>{invitation.targetName}</strong>.</p>
       : <p>Choose your name below, or ask household leaders to add you to the family.</p>}
-    <form onSubmit={submit}>
+    {!identityAuthenticated ? <section>
+      <p>Sign in to accept this invitation. Cradle will link your provider account to this family member—no PIN is needed.</p>
+      {error && <p className="error" role="alert">{error}</p>}
+      <SupabaseAuthActions onOAuthStart={() => rememberSupabaseInvite(reference)}
+        onComplete={() => setIdentityAuthenticated(true)} />
+      <button type="button" onClick={goHome}>Cancel</button>
+    </section> : <form onSubmit={submit}>
       {invitation?.inviteType === "household" && <label><span>Who are you joining as?</span>
         <select name="requestedMemberId" defaultValue="">
           {invitation.availableProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.displayName} — ready to join</option>)}
           <option value="">I’m not listed</option>
         </select></label>}
       <label><span>Your display name</span><input name="displayName" defaultValue={invitation?.targetName || ""} required /></label>
-      <label><span>Create a PIN</span><input name="pin" type="password" inputMode="numeric" minLength={4} maxLength={12} required /></label>
-      <label><span>Confirm PIN</span><input name="pinConfirmation" type="password" inputMode="numeric" minLength={4} maxLength={12} required /></label>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row-actions"><button className="primary" disabled={busy}>{busy ? "Joining…" : invitation?.alreadyAccepted ? "Sign in again" : "Join household"}</button>
         <button type="button" onClick={goHome}>Cancel</button></div>
-    </form></section></main>;
+    </form>}</section></main>;
 }

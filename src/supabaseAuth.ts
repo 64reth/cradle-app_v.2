@@ -5,6 +5,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const redirectUrl = import.meta.env.VITE_SUPABASE_REDIRECT_URL as string | undefined;
 const storageKey = "cradle-supabase-auth";
+const pendingInviteKey = "cradle-supabase-pending-invite";
 let client: SupabaseClient | undefined;
 
 export type SupabaseExchangeResult = {
@@ -38,6 +39,16 @@ function parseExchangeResponse(response: Response, candidate: unknown): Envelope
 }
 
 export const supabaseAuthConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+export function rememberSupabaseInvite(reference: string): void {
+  window.sessionStorage.setItem(pendingInviteKey, reference);
+}
+
+export function takeSupabaseInvite(): string | null {
+  const reference = window.sessionStorage.getItem(pendingInviteKey);
+  if (reference) window.sessionStorage.removeItem(pendingInviteKey);
+  return reference;
+}
 
 function configured(): { url: string; key: string } {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error("Sign-in is not configured yet.");

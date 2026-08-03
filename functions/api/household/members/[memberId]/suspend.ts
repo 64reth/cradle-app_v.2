@@ -18,7 +18,7 @@ export async function onRequestPost({ request, env, params }: Context) {
       throw new ApiError(403, "AUTHORIZATION_ERROR", "You cannot pause access for this family member.");
     }
     const now = new Date().toISOString();
-    const result = await db.prepare(`UPDATE members SET lifecycle_state = 'suspended', is_active = 0, updated_at = ?
+    const result = await db.prepare(`UPDATE members SET lifecycle_state = 'suspended', updated_at = ?
       WHERE household_id = ? AND id = ? AND role != 'owner' AND lifecycle_state NOT IN ('suspended','left')`)
       .bind(now, identity.householdId, params.memberId).run();
     if (!result.meta.changes) throw new ApiError(404, "NOT_FOUND", "Family member not found or cannot be suspended.");

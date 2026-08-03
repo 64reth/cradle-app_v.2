@@ -1,7 +1,7 @@
 import { trackAlphaError, trackAlphaEvent, trackAlphaTiming } from "./alphaDiagnostics";
 
 export type Envelope<T> = { ok: true; data: T; requestId?: string } |
-  { ok: false; error: { code?: string; message: string }; requestId?: string };
+  { ok: false; error: { code?: string; message: string; details?: Record<string, string> }; requestId?: string };
 
 export const developmentRuntimeHeader = "X-Cradle-Dev-Runtime-ID";
 export const developmentRuntimeStorageKey = "cradle-development-runtime-id";
@@ -10,7 +10,13 @@ export const developmentAuthenticatedStorageKey = "cradle-development-authentica
 export class TransportError extends Error {}
 export class RuntimeChangedError extends Error {}
 export class ApiResponseError extends Error {
-  constructor(message: string, public requestId?: string, public code?: string, public status?: number) { super(message); }
+  constructor(
+    message: string,
+    public requestId?: string,
+    public code?: string,
+    public status?: number,
+    public details?: Record<string, string>
+  ) { super(message); }
 }
 
 function diagnosticAction(path: string): string {
@@ -50,7 +56,9 @@ export async function envelope<T>(path: string, init?: RequestInit): Promise<{ r
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const { response, body } = await envelope<T>(path, init);
   if (!body.ok) {
-    const error = new ApiResponseError(body.error.message, body.requestId, body.error.code, response.status);
+    const error = new ApiResponseError(
+      body.error.message, body.requestId, body.error.code, response.status, body.error.details
+    );
     trackAlphaError(error, { action: diagnosticAction(path) });
     throw error;
   }

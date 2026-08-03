@@ -1,4 +1,4 @@
-import { authenticate } from "../../../auth";
+import { authenticate, sha256 } from "../../../auth";
 import { ApiError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success } from "../../../http";
 import { createHouseholdInvite } from "../../../invites";
 import { requireFamilyManager } from "../../../member-policy";
@@ -17,11 +17,28 @@ export async function onRequestPost({ request, env, params }: Context) {
         targetMemberId: string | null; accessLevel: string; ageBand: string
       }>();
     if (!old) throw new ApiError(404, "NOT_FOUND", "Invitation not found.");
+    // The retired invitation UUID is private leadership data with sufficient
+    // entropy to make regeneration deterministic and retry-safe without
+    // retaining plaintext invite credentials in D1.
+    const token = await sha256(`cradle-invite-token:${params.inviteId}`);
+    const code = (await sha256(`cradle-invite-code:${params.inviteId}`)).slice(0, 10).toUpperCase();
+    const tokenHash = await sha256(token);
+    const existing = await db.prepare(`SELECT id, target_member_id AS targetMemberId, expires_at AS expiresAt
+      FROM household_invites WHERE household_id = ? AND token_hash = ? LIMIT 1`)
+      .bind(identity.householdId, tokenHash)
+      .first<{ id: string; targetMemberId: string | null; expiresAt: string }>();
+    if (existing) {
+      return success({ invite: {
+        id: existing.id, targetMemberId: existing.targetMemberId, inviteType: existing.targetMemberId ? "profile" : "household",
+        token, code, inviteUrl: `${new URL(request.url).origin}/invite/${token}`, expiresAt: existing.expiresAt,
+        status: "active"
+      } }, requestId);
+    }
     const invite = await createHouseholdInvite(request, db, identity, {
       targetMemberId: old.targetMemberId, accessLevel: body.accessLevel || old.accessLevel,
       ageBand: body.ageBand || old.ageBand,
       expiry: body.expiry || "7_days"
-    }, params.inviteId);
+    }, params.inviteId, { token, code });
     return success({ invite }, requestId);
   });
 }

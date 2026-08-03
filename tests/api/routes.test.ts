@@ -69,7 +69,10 @@ describe("protected Phase 3 routes", () => {
     const { db, calls } = mockDb(owner, [{ displayName: "Alex", profileReference: "alex", role: "owner" }]);
     const response = await membersRoute({ request: request("/api/household/members?household_id=house-b"), env: { DB: db } });
     expect(response.status).toBe(200);
-    expect(calls.find((call) => call.sql.includes("FROM members m"))?.values).toEqual(["house-a"]);
+    const values = calls.find((call) => call.sql.includes("FROM members m"))?.values || [];
+    expect(values[0]).toBe("house-a");
+    expect(values.at(-1)).toBe("house-a");
+    expect(values).not.toContain("forged");
   });
 
   it("returns a safe family representation to a signed-in Child", async () => {
@@ -79,7 +82,9 @@ describe("protected Phase 3 routes", () => {
     const response = await membersRoute({ request: request("/api/household/members"), env: { DB: db } });
     const body = await response.json() as { data: { members: object[] } };
     expect(body.data.members).toEqual(safeMembers);
-    expect(calls.find((call) => call.sql.includes("FROM members m"))?.values).toEqual(["house-a"]);
+    const values = calls.find((call) => call.sql.includes("FROM members m"))?.values || [];
+    expect(values[0]).toBe("house-a");
+    expect(values.at(-1)).toBe("house-a");
   });
 
   it("stores a hash instead of the raw invitation code", async () => {

@@ -5,7 +5,7 @@ import { memberAvatar, type MemberAvatar } from "../shared/member-avatar";
 import {
   MEMBER_ACCESS_LEVELS, MEMBER_AGE_BANDS, accessLevelLabel, ageBandLabel,
 } from "../shared/members";
-import { api, failureMessage, jsonInit } from "./api";
+import { api, ApiResponseError, failureMessage, jsonInit } from "./api";
 import { FamilyAvatar } from "./FamilyAvatar";
 import { AvatarPalette } from "./AvatarPalette";
 import type { DashboardData, DashboardMember } from "./Dashboard";
@@ -39,14 +39,19 @@ const avatarFor = (member: DashboardMember): MemberAvatar => memberAvatar({
 });
 
 type MemberRelationshipState =
-  "joined" | "paused" | "managed" | "invite_pending" | "invite_expired" | "invite_revoked" | "ready";
+  "joined" | "paused" | "managed" | "invite_pending" | "invite_expired" | "invite_revoked" |
+  "deactivated" | "ready";
 
 function deriveMemberRelationshipState(member: DashboardMember): MemberRelationshipState {
-  if (member.hasAccount) return member.lifecycleState === "suspended" ? "paused" : "joined";
-  if (memberAccess(member) === "managed_member") return "managed";
+  if (member.hasAccount) {
+    return member.lifecycleState === "suspended" || member.accountIsActive === 0 ||
+      member.accountAccessStatus === "suspended" ? "paused" : "joined";
+  }
   if (member.invitationStatus === "pending") return "invite_pending";
   if (member.invitationStatus === "expired") return "invite_expired";
   if (member.invitationStatus === "revoked") return "invite_revoked";
+  if (member.isActive === 0 || member.lifecycleState === "left") return "deactivated";
+  if (memberAccess(member) === "managed_member") return "managed";
   return "ready";
 }
 
@@ -57,6 +62,7 @@ const memberStatusLabels: Record<MemberRelationshipState, string> = {
   invite_pending: "Invitation sent",
   invite_expired: "Invitation expired",
   invite_revoked: "Invitation revoked",
+  deactivated: "Member deactivated",
   ready: "Ready to invite",
 };
 
@@ -129,7 +135,17 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
       setCreatedMember(result.member); setSelectedMemberId(result.member.id); setMode("success");
       setNotice(`${result.member.displayName} has been added.`);
       await load(); await refreshDashboard();
-    } catch (reason) { setError(failureMessage(reason)); }
+    } catch (reason) {
+      if (reason instanceof ApiResponseError && reason.details?.existingMemberId) {
+        await load();
+        setSelectedMemberId(reason.details.existingMemberId);
+        setManagedAvatar(null);
+        setMode("manage");
+        setNotice(`${reason.details.existingMemberName || "That person"} already belongs to this household. Their existing profile is open.`);
+      } else {
+        setError(failureMessage(reason));
+      }
+    }
     finally { setBusy(false); }
   }
   async function createInvite(event: FormEvent<HTMLFormElement>) {

@@ -1,4 +1,4 @@
-import { randomToken, sha256, slug, textField } from "./auth";
+import { randomToken, sha256 } from "./auth";
 import { ApiError, conflictError, validationError } from "./http";
 import type { Identity } from "./auth";
 import type { JsonRecord } from "./types";
@@ -9,7 +9,8 @@ import {
 const expiryHours = (value: unknown): number => value === "24_hours" ? 24 : value === "30_days" ? 720 : value === "7_days" || value === undefined ? 168 : 0;
 
 export async function createHouseholdInvite(
-  request: Request, db: D1Database, identity: Identity, body: JsonRecord, replaceInviteId?: string
+  request: Request, db: D1Database, identity: Identity, body: JsonRecord, replaceInviteId?: string,
+  tokenMaterial?: { token: string; code: string }
 ) {
   const targetMemberId = typeof body.targetMemberId === "string" && body.targetMemberId ? body.targetMemberId : null;
   const hours = expiryHours(body.expiry);
@@ -40,7 +41,8 @@ export async function createHouseholdInvite(
     const compatible = legacyRoleForAccess(accessLevel);
     role = compatible === "owner" ? "parent_admin" : compatible;
   }
-  const token = randomToken(32); const code = randomToken(5).toUpperCase();
+  const token = tokenMaterial?.token || randomToken(32);
+  const code = tokenMaterial?.code || randomToken(5).toUpperCase();
   const [tokenHash, codeHash] = await Promise.all([sha256(token), sha256(code)]);
   const now = new Date(); const id = crypto.randomUUID();
   const expiresAt = new Date(now.getTime() + hours * 60 * 60_000).toISOString();
@@ -98,13 +100,4 @@ export function publicInviteState(invite: Awaited<ReturnType<typeof findPublicIn
   if (invite.expiresAt <= new Date().toISOString()) throw new ApiError(410, "INVITE_EXPIRED", "This invitation has expired.");
   if (!invite.acceptedAt && invite.useCount >= invite.maxUses) throw new ApiError(410, "INVITE_USED", "This invitation has already been used.");
   return invite;
-}
-
-export function accountFields(body: JsonRecord) {
-  const displayName = textField(body, "displayName", 1, 80);
-  const pin = textField(body, "pin", 4, 12);
-  if (!/^\d+$/.test(pin)) throw validationError("Please check your account details.", { pin: "Use 4-12 digits" });
-  if (body.pinConfirmation !== pin) throw validationError("Please check your account details.", { pinConfirmation: "PINs must match" });
-  const clientKey = textField(body, "clientKey", 8, 100);
-  return { displayName, pin, clientKey, accountReference: `${slug(displayName)}-${clientKey.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toLowerCase()}` };
 }

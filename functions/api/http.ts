@@ -73,8 +73,11 @@ export function notFoundError(message = "The requested resource was not found.")
   return new ApiError(404, "NOT_FOUND", message);
 }
 
-export function conflictError(message = "The resource changed before this request completed."): ApiError {
-  return new ApiError(409, "CONFLICT", message);
+export function conflictError(
+  message = "The resource changed before this request completed.",
+  details?: Record<string, string>
+): ApiError {
+  return new ApiError(409, "CONFLICT", message, details);
 }
 
 export function authorizationError(message = "You are not allowed to perform this action."): ApiError {

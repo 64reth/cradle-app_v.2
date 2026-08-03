@@ -63,6 +63,8 @@ describe("family and personal user journeys", () => {
         inviteId: "invite-pending", invitationStatus: "pending", inviteExpiresAt: "2999-01-01" },
       { ...gillian, id: "revoked", displayName: "Revoked Robin",
         inviteId: "invite-revoked", invitationStatus: "revoked", inviteExpiresAt: "2999-01-01" },
+      { ...gillian, isActive: 0, lifecycleState: "invited",
+        inviteId: "gillian-revoked", invitationStatus: "revoked", inviteExpiresAt: "2999-01-01" },
       child,
     ];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -80,10 +82,10 @@ describe("family and personal user journeys", () => {
     expect((await screen.findAllByText("Access paused")).length).toBeGreaterThan(0);
     expect(screen.getByText("Ready to invite")).toBeInTheDocument();
     expect(screen.getByText("Invitation sent")).toBeInTheDocument();
-    expect(screen.getByText("Invitation revoked")).toBeInTheDocument();
+    expect(screen.getAllByText("Invitation revoked")).toHaveLength(2);
     expect(screen.getByText("Managed by household leaders")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Restore access" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Invite again" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Invite again" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Resend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Invitations" })).not.toBeInTheDocument();
@@ -95,6 +97,11 @@ describe("family and personal user journeys", () => {
     expect(within(joinedStale!).getByText("Joined Cradle")).toBeInTheDocument();
     expect(within(joinedStale!).queryByText("Invitation revoked")).not.toBeInTheDocument();
     expect(within(joinedStale!).queryByRole("button", { name: "Invite again" })).not.toBeInTheDocument();
+    const gillianCard = screen.getByText("Gillian").closest("article");
+    expect(within(gillianCard!).getByText("Invitation revoked")).toBeInTheDocument();
+    expect(within(gillianCard!).getByRole("button", { name: "Invite again" })).toBeInTheDocument();
+    expect(within(gillianCard!).getByRole("button", { name: "Manage" })).toBeInTheDocument();
+    expect(screen.getAllByText("Gillian")).toHaveLength(1);
     for (const name of ["Paused Pat", "Ready Riley", "Pending Penny", "Revoked Robin", "Taryn"]) {
       const card = screen.getByText(name).closest("article");
       expect(card).not.toBeNull();
@@ -136,6 +143,38 @@ describe("family and personal user journeys", () => {
     expect(screen.getByRole("button", { name: "Add another" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Invite later" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+  });
+
+  it("opens an existing hidden member directly when duplicate-add detection returns its reference", async () => {
+    const hiddenGillian = { ...gillian, isActive: 0, lifecycleState: "invited",
+      inviteId: "revoked-gillian", invitationStatus: "revoked" as const };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/household/members" && init?.method === "POST") {
+        return response(409, { ok: false, error: {
+          code: "CONFLICT",
+          message: "Gillian is already a family member. Manage their existing profile instead.",
+          details: { existingMemberId: "gillian", existingMemberName: "Gillian" }
+        }, requestId: "duplicate-member" });
+      }
+      if (path === "/api/household/members") {
+        return response(200, { ok: true, data: { members: [owner, hiddenGillian, child] } });
+      }
+      if (path === "/api/household/join-requests") {
+        return response(200, { ok: true, data: { requests: [] } });
+      }
+      return response(200, { ok: true, data: { suggestions: [] } });
+    }));
+
+    render(<FamilyPanel dashboard={{ ...dashboard, members: [owner, child] }}
+      onClose={vi.fn()} onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add family member" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Gillian" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add family member" }));
+
+    expect(await screen.findByRole("heading", { name: "Manage Gillian" })).toBeInTheDocument();
+    expect(screen.getByText(/already belongs to this household.*existing profile is open/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Gillian");
   });
 
   it("gives leadership reachable family member, managed avatar and suggestion-review actions", async () => {

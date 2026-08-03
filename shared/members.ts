@@ -58,6 +58,6 @@ export const ageBandLabel = (value: string): string =>
 
 export const lifecycleLabel = (state: MemberLifecycleState): string => ({
   managed: "Cared for by household leaders", unclaimed: "Ready to invite", invited: "Invitation sent",
-  join_requested: "Waiting for a welcome", active: "Joined Cradle", suspended: "Taking a break",
+  join_requested: "Waiting for a welcome", active: "Joined Cradle", suspended: "Access paused",
   left: "No longer in the household"
 })[state];
