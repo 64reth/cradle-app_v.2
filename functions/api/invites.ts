@@ -3,8 +3,10 @@ import { ApiError, conflictError, validationError } from "./http";
 import type { Identity } from "./auth";
 import type { JsonRecord } from "./types";
 import {
-  isMemberAccessLevel, isMemberAgeBand, legacyRoleForAccess, type MemberAccessLevel, type MemberAgeBand
+  isMemberAccessLevel, isMemberAgeBand, legacyRoleForAccess,
+  type MemberAccessLevel, type MemberAgeBand
 } from "../../shared/members";
+import { invitationEligibility } from "../../shared/household-domain";
 
 const expiryHours = (value: unknown): number => value === "24_hours" ? 24 : value === "30_days" ? 720 : value === "7_days" || value === undefined ? 168 : 0;
 
@@ -23,12 +25,16 @@ export async function createHouseholdInvite(
     const member = await db.prepare(`SELECT display_name AS displayName, role,
       access_level AS accessLevel, age_band AS ageBand, account_id AS accountId,
       lifecycle_state AS lifecycleState FROM members
-      WHERE household_id = ? AND id = ? AND is_active = 1 AND lifecycle_state NOT IN ('suspended','left')`)
+      WHERE household_id = ? AND id = ?`)
       .bind(identity.householdId, targetMemberId)
       .first<{ displayName: string; role: "owner" | "parent_admin" | "adult" | "child";
         accessLevel: MemberAccessLevel; ageBand: MemberAgeBand; accountId: string | null; lifecycleState: string }>();
     if (!member || member.role === "owner") throw new ApiError(404, "NOT_FOUND", "That family member is not available to invite.");
-    if (member.accountId || member.lifecycleState === "active") throw conflictError(`${member.displayName} has already joined.`);
+    if (!invitationEligibility(identity, { ...member, id: targetMemberId, householdId: identity.householdId }).allowed) {
+      throw conflictError(member.accountId || member.lifecycleState === "active"
+        ? `${member.displayName} has already joined.`
+        : `${member.displayName} cannot be invited while their access is paused or deactivated.`);
+    }
     role = member.role; accessLevel = member.accessLevel; ageBand = member.ageBand; targetName = member.displayName;
   } else {
     if (!isMemberAccessLevel(body.accessLevel)) {
@@ -42,12 +48,38 @@ export async function createHouseholdInvite(
     role = compatible === "owner" ? "parent_admin" : compatible;
   }
   const token = tokenMaterial?.token || randomToken(32);
-  const code = tokenMaterial?.code || randomToken(5).toUpperCase();
-  const [tokenHash, codeHash] = await Promise.all([sha256(token), sha256(code)]);
+  const idempotencyKey = request.headers.get("X-Idempotency-Key")?.trim();
+  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
+    throw validationError("Please retry this invitation.", { idempotencyKey: "Use a valid request key" });
+  }
+  const stableMaterial = idempotencyKey
+    ? `${identity.householdId}:${identity.memberId}:${targetMemberId || "household"}:${idempotencyKey}` : null;
+  const stableToken = stableMaterial ? await sha256(`cradle-invite-token:${stableMaterial}`) : token;
+  const code = tokenMaterial?.code || (stableMaterial
+    ? (await sha256(`cradle-invite-code:${stableMaterial}`)).slice(0, 10).toUpperCase()
+    : randomToken(5).toUpperCase());
+  const [tokenHash, codeHash] = await Promise.all([sha256(stableToken), sha256(code)]);
+  if (idempotencyKey) {
+    const repeated = await db.prepare(`SELECT id, target_member_id AS targetMemberId, expires_at AS expiresAt,
+      revoked_at AS revokedAt, accepted_at AS acceptedAt FROM household_invites
+      WHERE household_id = ? AND token_hash = ? LIMIT 1`)
+      .bind(identity.householdId, tokenHash).first<{
+        id: string; targetMemberId: string | null; expiresAt: string;
+        revokedAt: string | null; acceptedAt: string | null;
+      }>();
+    if (repeated && !repeated.revokedAt && !repeated.acceptedAt) {
+      return { id: repeated.id, targetMemberId: repeated.targetMemberId, targetName,
+        inviteType: repeated.targetMemberId ? "profile" as const : "household" as const,
+        role, accessLevel, ageBand, token: stableToken, code,
+        inviteUrl: `${new URL(request.url).origin}/invite/${stableToken}`,
+        expiresAt: repeated.expiresAt, status: "active" as const,
+        deliveryStatus: "not_requested" as const, repeated: true };
+    }
+  }
   const now = new Date(); const id = crypto.randomUUID();
   const expiresAt = new Date(now.getTime() + hours * 60 * 60_000).toISOString();
   try {
-    await db.batch([
+    const results = await db.batch([
       ...(replaceInviteId ? [db.prepare(`UPDATE household_invites SET revoked_at = ?, updated_at = ?
         WHERE household_id = ? AND id = ? AND accepted_at IS NULL`)
         .bind(now.toISOString(), now.toISOString(), identity.householdId, replaceInviteId)] : []),
@@ -59,17 +91,22 @@ export async function createHouseholdInvite(
         .bind(id, identity.householdId, targetMemberId, tokenHash, codeHash, targetMemberId ? "profile" : "household",
           role, identity.memberId, expiresAt, targetMemberId ? 1 : 10, now.toISOString(), now.toISOString(),
           accessLevel, ageBand),
-      ...(targetMemberId ? [db.prepare(`UPDATE members SET lifecycle_state = 'invited', updated_at = ?
+      ...(targetMemberId ? [db.prepare(`UPDATE members SET lifecycle_state = 'invited', is_active = 1, updated_at = ?
         WHERE household_id = ? AND id = ? AND account_id IS NULL`)
         .bind(now.toISOString(), identity.householdId, targetMemberId)] : [])
     ]);
+    const insertIndex = replaceInviteId ? 1 : 0;
+    if (results[insertIndex]?.meta.changes !== 1) {
+      throw conflictError("The invitation changed before it could be saved. Refresh and try again.");
+    }
   } catch (error) {
     if (String(error).includes("UNIQUE constraint")) throw conflictError("An active invitation already exists. Revoke or regenerate it first.");
     throw error;
   }
-  const inviteUrl = `${new URL(request.url).origin}/invite/${token}`;
+  const inviteUrl = `${new URL(request.url).origin}/invite/${stableToken}`;
   return { id, targetMemberId, targetName, inviteType: targetMemberId ? "profile" as const : "household" as const,
-    role, accessLevel, ageBand, token, code, inviteUrl, expiresAt, status: "active" as const };
+    role, accessLevel, ageBand, token: stableToken, code, inviteUrl, expiresAt, status: "active" as const,
+    deliveryStatus: "not_requested" as const };
 }
 
 export async function findPublicInvite(db: D1Database, reference: string) {

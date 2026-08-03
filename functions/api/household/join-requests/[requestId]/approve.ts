@@ -9,19 +9,22 @@ export async function onRequestPost({ request, env, params }: Context) {
   return handleApiRequest(request, async (requestId) => {
     const db = requireD1(env); const identity = await authenticate(request, db); requireFamilyManager(identity);
     const body = await parseJsonBody(request);
-    const join = await db.prepare(`SELECT j.account_id AS accountId, j.requested_member_id AS requestedMemberId,
+    const join = await db.prepare(`SELECT j.account_id AS accountId, j.requested_member_id AS requestedMemberId, j.status,
       j.proposed_display_name AS proposedDisplayName, i.invited_role AS invitedRole,
       i.invited_access_level AS invitedAccessLevel, i.invited_age_band AS invitedAgeBand,
       a.display_name AS accountName
       FROM household_join_requests j
       JOIN household_invites i ON i.household_id = j.household_id AND i.id = j.invite_id
       JOIN user_accounts a ON a.id = j.account_id
-      WHERE j.household_id = ? AND j.id = ? AND j.status = 'pending'`)
+      WHERE j.household_id = ? AND j.id = ?`)
       .bind(identity.householdId, params.requestId).first<{ accountId: string; requestedMemberId: string | null;
         proposedDisplayName: string | null; invitedRole: "parent_admin" | "adult" | "child";
-        invitedAccessLevel: string; invitedAgeBand: string; accountName: string
+        invitedAccessLevel: string; invitedAgeBand: string; accountName: string; status: "pending" | "approved" | "declined"
       }>();
-    if (!join) throw new ApiError(404, "NOT_FOUND", "Pending join request not found.");
+    if (!join) throw new ApiError(404, "NOT_FOUND", "Join request not found.");
+    if (join.status === "approved") return success({ approved: true, memberId: join.requestedMemberId,
+      destination: "/dashboard", next: "pending_requests", repeated: true }, requestId);
+    if (join.status !== "pending") throw conflictError("That join request has already been declined.");
     const now = new Date().toISOString();
     let memberId = join.requestedMemberId;
     const createNew = body.resolution === "create_new" || !memberId;
@@ -39,9 +42,9 @@ export async function onRequestPost({ request, env, params }: Context) {
             .bind(memberId, identity.householdId, displayName, join.invitedRole, now, now, reference,
               join.accountId, join.invitedAgeBand === "young_child" ? "dependent" : join.invitedAgeBand,
               join.invitedAccessLevel, join.invitedAgeBand),
-          db.prepare(`UPDATE household_join_requests SET status = 'approved', reviewed_by_member_id = ?,
+          db.prepare(`UPDATE household_join_requests SET status = 'approved', requested_member_id = ?, reviewed_by_member_id = ?,
             reviewed_at = ?, updated_at = ? WHERE household_id = ? AND id = ? AND status = 'pending'`)
-            .bind(identity.memberId, now, now, identity.householdId, params.requestId)
+            .bind(memberId, identity.memberId, now, now, identity.householdId, params.requestId)
         ]);
       } catch (error) {
         if (String(error).includes("UNIQUE constraint")) throw conflictError("That account or family member has already joined.");

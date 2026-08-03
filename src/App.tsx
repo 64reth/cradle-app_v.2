@@ -49,7 +49,7 @@ const viewFromPath = (path: string): AuthenticatedView =>
       path === "/schedule" || path === "/calendar" ? "calendar" :
       path === "/meals" ? "meals" :
       path === "/together" ? "together" :
-      path === "/operations" ? "operations" :
+      (path === "/operations" || path === "/operations/health") ? "operations" :
       path === "/me" ? "me" : "dashboard";
 const pathForView = (view: AuthenticatedView) =>
   view === "systems" ? "/routines" : view === "calendar" ? "/schedule" : `/${view}`;

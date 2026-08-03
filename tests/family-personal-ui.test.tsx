@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FamilyPanel } from "../src/Family";
 import { InvitationPage } from "../src/Invitation";
@@ -27,7 +27,7 @@ const dashboard: DashboardData = {
   currentDate: "2026-07-23", deferredModules: ["Plan", "Messages"]
 };
 
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("family and personal user journeys", () => {
   it("presents Add family member permissions as accessible selectable cards", async () => {
@@ -58,6 +58,8 @@ describe("family and personal user journeys", () => {
         lifecycleState: "suspended", hasAccount: 1, invitationStatus: "revoked", inviteId: "stale-paused" },
       { ...gillian, id: "joined-stale", displayName: "Joined Stale",
         lifecycleState: "active", hasAccount: 1, invitationStatus: "revoked", inviteId: "stale-joined" },
+      { ...gillian, id: "unlinked-active", displayName: "Unlinked Active",
+        lifecycleState: "active", hasAccount: 0, invitationStatus: "revoked", inviteId: "stale-unlinked-active" },
       { ...gillian, id: "ready", displayName: "Ready Riley" },
       { ...gillian, id: "pending", displayName: "Pending Penny", lifecycleState: "invited",
         inviteId: "invite-pending", invitationStatus: "pending", inviteExpiresAt: "2999-01-01" },
@@ -97,6 +99,10 @@ describe("family and personal user journeys", () => {
     expect(within(joinedStale!).getByText("Joined Cradle")).toBeInTheDocument();
     expect(within(joinedStale!).queryByText("Invitation revoked")).not.toBeInTheDocument();
     expect(within(joinedStale!).queryByRole("button", { name: "Invite again" })).not.toBeInTheDocument();
+    const unlinkedActive = screen.getByText("Unlinked Active").closest("article");
+    expect(within(unlinkedActive!).getByText("Joined Cradle")).toBeInTheDocument();
+    expect(within(unlinkedActive!).queryByText("Invitation revoked")).not.toBeInTheDocument();
+    expect(within(unlinkedActive!).queryByRole("button", { name: "Invite again" })).not.toBeInTheDocument();
     const gillianCard = screen.getByText("Gillian").closest("article");
     expect(within(gillianCard!).getByText("Invitation revoked")).toBeInTheDocument();
     expect(within(gillianCard!).getByRole("button", { name: "Invite again" })).toBeInTheDocument();
@@ -177,6 +183,58 @@ describe("family and personal user journeys", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Gillian");
   });
 
+  it("times out Invite again, preserves Gillian, refreshes status, and safely retries once", async () => {
+    vi.useFakeTimers();
+    const revokedGillian = { ...gillian, isActive: 0, lifecycleState: "invited",
+      inviteId: "revoked-gillian", invitationStatus: "revoked" as const };
+    const calls: string[] = []; const retryKeys: string[] = []; let attempts = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input); calls.push(`${init?.method || "GET"} ${path}`);
+      if (path.endsWith("/regenerate") && init?.method === "POST") {
+        retryKeys.push(new Headers(init.headers).get("X-Idempotency-Key") || "");
+        attempts += 1;
+        if (attempts === 1) return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort",
+          () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+        return response(200, { ok: true, data: { invite: {
+          id: "replacement", targetMemberId: "gillian", targetName: "Gillian", inviteType: "profile",
+          role: "parent_admin", expiresAt: "2999", status: "active",
+          inviteUrl: "https://cradle.test/invite/replacement", code: "NEWCODE"
+        } } });
+      }
+      if (path === "/api/household/members") {
+        return response(200, { ok: true, data: { members: [owner, revokedGillian, child] } });
+      }
+      if (path === "/api/household/join-requests") return response(200, { ok: true, data: { requests: [] } });
+      if (path === "/api/household/task-suggestions") return response(200, { ok: true, data: { suggestions: [] } });
+      if (path === "/api/dashboard") return response(200, { ok: true, data: dashboard });
+      throw new Error(`Unexpected ${path}`);
+    }));
+
+    render(<FamilyPanel dashboard={{ ...dashboard, members: [owner, revokedGillian, child] }}
+      onClose={vi.fn()} onChanged={vi.fn()} />);
+    const gillianCard = screen.getByText("Gillian").closest("article")!;
+    fireEvent.click(within(gillianCard).getByRole("button", { name: "Invite again" }));
+    expect(within(gillianCard).getByRole("button", { name: "Creating invite…" })).toBeDisabled();
+    expect(attempts).toBe(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); await Promise.resolve(); });
+    expect(screen.getByText("This is taking longer than expected")).toBeInTheDocument();
+    expect(screen.getByText("Gillian")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(attempts).toBe(2);
+    expect(new Set(retryKeys).size).toBe(1);
+    expect(retryKeys[0]).toBeTruthy();
+    const firstPost = calls.indexOf("POST /api/household/invites/revoked-gillian/regenerate");
+    const secondPost = calls.lastIndexOf("POST /api/household/invites/revoked-gillian/regenerate");
+    expect(calls.slice(firstPost + 1, secondPost)).toContain("GET /api/household/members");
+  });
+
   it("gives leadership reachable family member, managed avatar and suggestion-review actions", async () => {
     const suggestion = {
       id: "suggestion", title: "Add a shoe tidy", suggestionType: "one_off", note: "The hall gets busy.",
@@ -218,7 +276,8 @@ describe("family and personal user journeys", () => {
       if (path === "/api/household/task-suggestions") return response(200, { ok: true, data: { suggestions: [] } });
       if (path === "/api/household/invites" && init?.method === "POST") return response(201, { ok: true, data: { invite: {
         id: "invite", targetMemberId: "gillian", targetName: "Gillian", inviteType: "profile", role: "parent_admin",
-        expiresAt: "2999", status: "active", inviteUrl: "https://cradle.test/invite/private", code: "ABC123"
+        expiresAt: "2999", status: "active", deliveryStatus: "failed",
+        inviteUrl: "https://cradle.test/invite/private", code: "ABC123"
       } } });
       if (path === "/api/household/invites") return response(200, { ok: true, data: { invites: [] } });
       if (path === "/api/dashboard") return response(200, { ok: true, data: dashboard });
@@ -231,6 +290,7 @@ describe("family and personal user journeys", () => {
     expect(await screen.findByRole("button", { name: "Copy link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy code" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show QR code" })).toBeInTheDocument();
+    expect(screen.getByText(/Delivery failed.*link is still ready to share/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
   });
 

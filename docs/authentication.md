@@ -1,5 +1,7 @@
 # Authentication and household invitations
 
+Authentication identities and sessions are deliberately distinct from household roles and members. See [Household Domain architecture](./household-domain.md) for the source-of-truth boundaries.
+
 ## Account, Member and session separation
 
 Authentication decisions happen in the Cloudflare Worker handlers. A `user_account` is the credential-bearing identity; a household `Member` is the durable person-in-the-home profile. Managed and unclaimed Members intentionally have no account or session. A Member with access links to at most one account, and an account can claim at most one Member in a household.

@@ -1,23 +1,21 @@
-import { identityAccessLevel, type Identity } from "./auth";
+import type { Identity } from "./auth";
 import { authorizationError } from "./http";
+import { actorAccessLevel, canManageMember as domainCanManageMember, hasCapability } from "../../shared/household-domain";
 
 export type FamilyAccess = "manage" | "participate" | "limited";
 
 export function familyAccess(identity: Identity): FamilyAccess {
-  if (identityAccessLevel(identity) === "household_admin") return "manage";
-  if (identityAccessLevel(identity) === "household_member") return "participate";
+  if (actorAccessLevel(identity) === "household_admin") return "manage";
+  if (actorAccessLevel(identity) === "household_member") return "participate";
   return "limited";
 }
 
 export function requireFamilyManager(identity: Identity): void {
-  if (familyAccess(identity) !== "manage") throw authorizationError("Household leaders manage family and invitations.");
+  if (!hasCapability(identity, "manage_member")) throw authorizationError("Household leaders manage family and invitations.");
 }
 
 export function canManageMember(identity: Identity, member: { id: string; role: string; accessLevel?: string | null }): boolean {
-  if (identity.memberId === member.id) return true;
-  if (familyAccess(identity) !== "manage") return false;
-  if (member.role === "owner") return false;
-  return true;
+  return domainCanManageMember(identity, member);
 }
 
 export function requireOwnMember(identity: Identity, memberId: string): void {

@@ -33,6 +33,21 @@ export const MEMBER_LIFECYCLE_STATES = [
 ] as const;
 export type MemberLifecycleState = typeof MEMBER_LIFECYCLE_STATES[number];
 
+export type MemberInviteEligibility = {
+  role: string;
+  lifecycleState?: string | null;
+  accountId?: string | null;
+  hasAccount?: number | boolean;
+};
+
+/** A permanent member may be invited only while they remain unlinked and unjoined. */
+export const memberCanBeInvited = (member: MemberInviteEligibility): boolean => {
+  const hasAccountLink = member.accountId != null || Boolean(member.hasAccount);
+  const lifecycle = member.lifecycleState || "unclaimed";
+  return member.role !== "owner" && !hasAccountLink &&
+    !["active", "suspended", "left"].includes(lifecycle);
+};
+
 export const isMemberAccessLevel = (value: unknown): value is MemberAccessLevel =>
   typeof value === "string" && MEMBER_ACCESS_LEVELS.some((choice) => choice.value === value);
 export const isMemberAgeBand = (value: unknown): value is MemberAgeBand =>

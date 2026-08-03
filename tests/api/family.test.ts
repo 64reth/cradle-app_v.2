@@ -50,13 +50,16 @@ function mockDb(options: Options = {}) {
             }
             if (sql.includes("client_key = ?") && sql.includes("FROM members")) return options.existingMember ?? null;
             if (sql.includes("lower(trim(display_name))")) return options.duplicateMember ?? null;
-            if (sql.includes("FROM members") && sql.includes("account_id AS accountId") && sql.includes("is_active = 1")) {
+            if (sql.includes("FROM members") && sql.includes("account_id AS accountId") &&
+              sql.includes("access_level AS accessLevel") && sql.includes("display_name AS displayName")) {
               return options.targetMember ?? null;
             }
             if (sql.includes("FROM household_invites i") && sql.includes("token_hash")) return options.invite ?? null;
             if (sql.includes("FROM household_invites") && sql.includes("token_hash = ?")) {
               return options.regeneratedInvite ?? null;
             }
+            if (sql.includes("FROM household_invites") && sql.includes("revoked_at AS revokedAt") &&
+              !sql.includes("token_hash")) return options.oldInvite ?? null;
             if (sql.includes("FROM household_invites WHERE")) return options.oldInvite ?? null;
             if (sql.includes("FROM user_accounts")) return options.account ?? null;
             if (sql.includes("FROM household_join_requests j")) return options.joinRequest ?? null;
@@ -204,6 +207,25 @@ describe("family, invitation and personal APIs", () => {
     expect(insert?.values).not.toContain("forged");
   });
 
+  it("returns the current invitation for a repeated server-enforced idempotency key", async () => {
+    const target = { displayName: "Gillian", role: "parent_admin", accessLevel: "household_admin",
+      ageBand: "adult", accountId: null, lifecycleState: "unclaimed" };
+    const repeated = { id: "existing-invite", targetMemberId: "gillian", expiresAt: "2999-01-01",
+      revokedAt: null, acceptedAt: null };
+    const { db, batches } = mockDb({ targetMember: target, regeneratedInvite: repeated });
+    const inviteRequest = request("/api/household/invites", "POST", {
+      targetMemberId: "gillian", expiry: "7_days"
+    });
+    inviteRequest.headers.set("X-Idempotency-Key", "stable-create-gillian");
+    const response = await createInvite({ request: inviteRequest, env: { DB: db } });
+    const body = await response.json() as { data: { invite: { id: string; targetMemberId: string; repeated: boolean } } };
+
+    expect(body.data.invite).toMatchObject({
+      id: "existing-invite", targetMemberId: "gillian", repeated: true
+    });
+    expect(batches).toHaveLength(0);
+  });
+
   it("cannot create an invitation for a Member outside the authenticated household", async () => {
     const { db, calls } = mockDb({ targetMember: null });
     const response = await createInvite({ request: request("/api/household/invites", "POST", {
@@ -220,6 +242,8 @@ describe("family, invitation and personal APIs", () => {
         displayName: "Gillian"
       }, false), env: { DB: db }, params: { reference: "token" } });
       expect(response.status).toBe(410);
+      const body = await response.json() as { error: { code: string } };
+      expect(body.error.code).toBe("revokedAt" in patch ? "INVITE_REVOKED" : "INVITE_EXPIRED");
     }
   });
 
@@ -297,6 +321,50 @@ describe("family, invitation and personal APIs", () => {
     expect(batches[0][1].sql).toContain("INSERT INTO household_invites");
   });
 
+  it.each(["revoked", "expired"])("reinvites an inactive unlinked member after a %s invitation", async () => {
+    const { db, batches } = mockDb({
+      oldInvite: { targetMemberId: "gillian", accessLevel: "household_admin", ageBand: "adult" },
+      targetMember: {
+        displayName: "Gillian", role: "parent_admin", accessLevel: "household_admin", ageBand: "adult",
+        accountId: null, lifecycleState: "invited", isActive: 0
+      }
+    });
+    const response = await regenerateInvite({
+      request: request("/api/household/invites/old/regenerate", "POST", { expiry: "7_days" }),
+      env: { DB: db }, params: { inviteId: "old" }
+    });
+    const body = await response.json() as { data: { invite: { id: string; targetMemberId: string; token: string } } };
+
+    expect(response.status).toBe(200);
+    expect(body.data.invite.targetMemberId).toBe("gillian");
+    expect(body.data.invite.id).not.toBe("old");
+    expect(body.data.invite.token).toBeTruthy();
+    expect(batches).toHaveLength(1);
+    expect(batches[0].filter(({ sql }) => sql.includes("INSERT INTO household_invites"))).toHaveLength(1);
+    expect(batches[0].find(({ sql }) => sql.includes("INSERT INTO household_invites"))?.values)
+      .toContain("gillian");
+    expect(batches[0].find(({ sql }) => sql.includes("UPDATE members SET lifecycle_state"))?.sql)
+      .toContain("is_active = 1");
+    expect(batches[0].some(({ sql }) => sql.includes("INSERT INTO members"))).toBe(false);
+  });
+
+  it("does not reinvite a linked active member", async () => {
+    const { db, batches } = mockDb({
+      oldInvite: { targetMemberId: "gillian", accessLevel: "household_admin", ageBand: "adult" },
+      targetMember: {
+        displayName: "Gillian", role: "parent_admin", accessLevel: "household_admin", ageBand: "adult",
+        accountId: "gillian-account", lifecycleState: "active", isActive: 1
+      }
+    });
+    const response = await regenerateInvite({
+      request: request("/api/household/invites/old/regenerate", "POST", { expiry: "7_days" }),
+      env: { DB: db }, params: { inviteId: "old" }
+    });
+
+    expect(response.status).toBe(409);
+    expect(batches).toHaveLength(0);
+  });
+
   it("returns the same fresh invitation when Invite again is retried", async () => {
     const regenerated = {
       id: "fresh-invite", targetMemberId: "gillian", expiresAt: "2999-01-01",
@@ -318,11 +386,25 @@ describe("family, invitation and personal APIs", () => {
     expect(batches).toHaveLength(0);
   });
 
+  it("treats repeated revocation as success without another write", async () => {
+    const { db, batches } = mockDb({ oldInvite: {
+      targetMemberId: "gillian", revokedAt: "2026-08-03", acceptedAt: null
+    } });
+    const response = await revokeInvite({
+      request: request("/api/household/invites/old/revoke", "POST"),
+      env: { DB: db }, params: { inviteId: "old" }
+    });
+    const body = await response.json() as { data: { revoked: boolean; repeated: boolean } };
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({ revoked: true, repeated: true });
+    expect(batches).toHaveLength(0);
+  });
+
   it("approves a general-invite request by linking only the requested household profile", async () => {
     const { db, batches } = mockDb({ joinRequest: {
       accountId: "joining-account", requestedMemberId: "gillian", proposedDisplayName: null,
       invitedRole: "parent_admin", invitedAccessLevel: "household_admin", invitedAgeBand: "adult",
-      accountName: "Gillian"
+      accountName: "Gillian", status: "pending"
     } });
     const response = await approveJoinRequest({
       request: request("/api/household/join-requests/request/approve", "POST", { resolution: "link" }),
@@ -332,6 +414,22 @@ describe("family, invitation and personal APIs", () => {
     expect(batches[0][0].sql).toContain("UPDATE members SET account_id");
     expect(batches[0][0].values).toContain("house-a");
     expect(batches[0][0].values).toContain("gillian");
+  });
+
+  it("returns an already approved join request without creating or linking another member", async () => {
+    const { db, batches } = mockDb({ joinRequest: {
+      accountId: "joining-account", requestedMemberId: "gillian", proposedDisplayName: null,
+      invitedRole: "adult", invitedAccessLevel: "household_member", invitedAgeBand: "adult",
+      accountName: "Gillian", status: "approved"
+    } });
+    const response = await approveJoinRequest({
+      request: request("/api/household/join-requests/request/approve", "POST", { resolution: "link" }),
+      env: { DB: db }, params: { requestId: "request" }
+    });
+    const body = await response.json() as { data: { memberId: string; repeated: boolean } };
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({ memberId: "gillian", repeated: true });
+    expect(batches).toHaveLength(0);
   });
 
   it("denies Adult and Child join-request approval", async () => {
@@ -435,6 +533,7 @@ describe("family, invitation and personal APIs", () => {
   it("restores a paused linked member without creating a new member", async () => {
     const restored = mockDb({ member: {
       id: "gillian", role: "adult", accessLevel: "household_member", accountId: "provider-account",
+      lifecycleState: "suspended", isActive: 0,
     } });
     const response = await restoreMember({
       request: request("/api/household/members/gillian/restore", "POST"),

@@ -5,16 +5,19 @@ import { memberAvatar, type MemberAvatar } from "../shared/member-avatar";
 import {
   MEMBER_ACCESS_LEVELS, MEMBER_AGE_BANDS, accessLevelLabel, ageBandLabel,
 } from "../shared/members";
+import { invitationEligibility, type HouseholdActor } from "../shared/household-domain";
 import { api, ApiResponseError, failureMessage, jsonInit } from "./api";
 import { FamilyAvatar } from "./FamilyAvatar";
 import { AvatarPalette } from "./AvatarPalette";
 import type { DashboardData, DashboardMember } from "./Dashboard";
 import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
+import { useStableMutation } from "./useStableMutation";
 
 type Invite = {
   id: string; targetMemberId: string | null; targetName: string | null; inviteType: "profile" | "household";
   role: string; expiresAt: string; status: "active" | "accepted" | "expired" | "revoked";
+  deliveryStatus?: "not_requested" | "pending" | "succeeded" | "failed";
   inviteUrl?: string; code?: string;
 };
 type JoinRequest = { id: string; requestedMemberId: string | null; displayName: string; requestedMemberName: string | null };
@@ -43,7 +46,7 @@ type MemberRelationshipState =
   "deactivated" | "ready";
 
 function deriveMemberRelationshipState(member: DashboardMember): MemberRelationshipState {
-  if (member.hasAccount) {
+  if (member.hasAccount || member.lifecycleState === "active") {
     return member.lifecycleState === "suspended" || member.accountIsActive === 0 ||
       member.accountAccessStatus === "suspended" ? "paused" : "joined";
   }
@@ -84,11 +87,13 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
   });
   const [createdMember, setCreatedMember] = useState<DashboardMember | null>(null);
   const [newMemberKey, setNewMemberKey] = useState(clientKey);
+  const [inviteRequestKey, setInviteRequestKey] = useState(clientKey);
   const [latestInvite, setLatestInvite] = useState<Invite | null>(null);
   const [qr, setQr] = useState(""); const [showQr, setShowQr] = useState(false);
   const qrRef = useRef<HTMLDivElement | null>(null);
   const qrReturnFocusRef = useRef<HTMLElement | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
+  const stableMutation = useStableMutation();
 
   const load = useCallback(async () => {
     try {
@@ -125,6 +130,11 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
   async function refreshDashboard() {
     onChanged(await api<DashboardData>("/api/dashboard"));
   }
+  function refreshAfterMutation() {
+    void Promise.all([load(), refreshDashboard()]).catch(() => {
+      setError("The action succeeded, but Cradle could not refresh the latest status. Refresh status to confirm it.");
+    });
+  }
   async function addMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); const form = new FormData(event.currentTarget);
     try {
@@ -149,17 +159,21 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
     finally { setBusy(false); }
   }
   async function createInvite(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); const form = new FormData(event.currentTarget);
-    try {
-      const result = await api<{ invite: Invite }>("/api/household/invites", jsonInit("POST", {
+    event.preventDefault(); setError(""); const form = new FormData(event.currentTarget);
+    const actionKey = `create-invite:${selectedMemberId || "household"}`;
+    const requestKey = inviteRequestKey;
+    await stableMutation.run({ key: actionKey, pendingLabel: "Creating invite…",
+      task: (signal) => api<{ invite: Invite }>("/api/household/invites", jsonInit("POST", {
         targetMemberId: selectedMemberId || null, accessLevel: form.get("accessLevel"),
         ageBand: form.get("ageBand"), expiry: form.get("expiry")
-      }));
-      setLatestInvite(result.invite); setMode("success"); setNotice(selectedMemberId
-        ? `Invitation ready for ${result.invite.targetName}.` : "Household invitation ready.");
-      await load(); await refreshDashboard();
-    } catch (reason) { setError(failureMessage(reason)); }
-    finally { setBusy(false); }
+      }, { idempotencyKey: requestKey, signal })),
+      refreshBeforeRetry: async () => { await load(); },
+      onSuccess: (result) => {
+        setLatestInvite(result.invite); setMode("success"); setNotice(selectedMemberId
+          ? `Invitation ready for ${result.invite.targetName}.` : "Household invitation ready.");
+        setInviteRequestKey(clientKey()); refreshAfterMutation();
+      }
+    });
   }
   async function revealQr() {
     if (!latestInvite?.inviteUrl) return;
@@ -168,22 +182,26 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
     setShowQr(true);
   }
   async function revoke(inviteId: string) {
-    setBusy(true); setError("");
-    try {
-      await api(`/api/household/invites/${inviteId}/revoke`, jsonInit("POST"));
-      setNotice("Invitation revoked."); await load(); await refreshDashboard();
-    } catch (reason) { setError(failureMessage(reason)); }
-    finally { setBusy(false); }
+    const actionKey = `revoke:${inviteId}`; setError("");
+    await stableMutation.run({ key: actionKey, pendingLabel: "Revoking invite…",
+      task: (signal) => api(`/api/household/invites/${inviteId}/revoke`,
+        jsonInit("POST", {}, { idempotencyKey: actionKey, signal })),
+      refreshBeforeRetry: async () => { await load(); },
+      onSuccess: () => { setNotice("Invitation revoked."); refreshAfterMutation(); }
+    });
   }
   async function regenerate(invite: Invite) {
-    setBusy(true); setError("");
-    try {
-      const result = await api<{ invite: Invite }>(`/api/household/invites/${invite.id}/regenerate`,
-        jsonInit("POST", { expiry: "7_days" }));
-      setLatestInvite(result.invite); setMode("success"); setNotice("A fresh invitation is ready.");
-      await load(); await refreshDashboard();
-    } catch (reason) { setError(failureMessage(reason)); }
-    finally { setBusy(false); }
+    const actionKey = `reinvite:${invite.id}`; setError("");
+    await stableMutation.run({ key: actionKey,
+      pendingLabel: invite.status === "active" ? "Resending invite…" : "Creating invite…",
+      task: (signal) => api<{ invite: Invite }>(`/api/household/invites/${invite.id}/regenerate`,
+        jsonInit("POST", { expiry: "7_days" }, { idempotencyKey: actionKey, signal })),
+      refreshBeforeRetry: async () => { await load(); },
+      onSuccess: (result) => {
+        setLatestInvite(result.invite); setMode("success"); setNotice("A fresh invitation link is ready. Delivery was not requested; copy or share it below.");
+        refreshAfterMutation();
+      }
+    });
   }
   async function review(request: JoinRequest, decision: "approve" | "decline") {
     setBusy(true); setError("");
@@ -230,13 +248,16 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
   }
   async function restoreMember(memberId = selectedMemberId) {
     if (!memberId) return;
-    setBusy(true); setError("");
-    try {
-      await api(`/api/household/members/${memberId}/restore`, jsonInit("POST"));
-      setNotice("Access restored. They can sign in again with their provider.");
-      setMode("overview"); await load(); await refreshDashboard();
-    } catch (reason) { setError(failureMessage(reason)); }
-    finally { setBusy(false); }
+    const actionKey = `restore:${memberId}`; setError("");
+    await stableMutation.run({ key: actionKey, pendingLabel: "Restoring access…",
+      task: (signal) => api(`/api/household/members/${memberId}/restore`,
+        jsonInit("POST", {}, { idempotencyKey: actionKey, signal })),
+      refreshBeforeRetry: async () => { await load(); },
+      onSuccess: () => {
+        setNotice("Access restored. They can sign in again with their provider.");
+        setMode("overview"); refreshAfterMutation();
+      }
+    });
   }
   async function saveManagedAvatar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); const form = new FormData(event.currentTarget);
@@ -270,6 +291,12 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
       <p>Add the people who share this home so Cradle can organise responsibilities.</p></div>
       <button className="text-button" onClick={onClose}>Close</button></div>
     {notice && <p className="success-message" role="status">{notice}</p>}
+    {stableMutation.feedback && stableMutation.feedback.state !== "success" &&
+      <div className="local-error" aria-live="polite"><p role={stableMutation.feedback.state === "pending" ? "status" : "alert"}>
+        {stableMutation.feedback.message}</p>{stableMutation.feedback.state !== "pending" && <div className="row-actions">
+          <button className="primary" onClick={() => void stableMutation.retry()}>Try again</button>
+          <button onClick={() => void load()}>Refresh status</button>
+          <button onClick={stableMutation.dismiss}>Dismiss</button></div>}</div>}
     {error && <div className="local-error"><p className="error" role="alert">{error}</p>
       <button onClick={() => setError("")}>Try again</button><button onClick={onClose}>Back to Dashboard</button></div>}
 
@@ -277,6 +304,9 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
       <section className="dashboard-card"><h2>Family members</h2>
         <div className="family-manage-list">{members.map((member) => {
           const relationshipState = deriveMemberRelationshipState(member);
+          const canInviteMember = invitationEligibility({ householdId: "current", memberId: dashboard.currentUser.id,
+            role: dashboard.currentUser.role, accessLevel: dashboard.currentUser.accessLevel } as HouseholdActor,
+          { ...member, householdId: "current" }).allowed;
           return <article key={member.id}>
           <FamilyAvatar name={member.preferredName || member.displayName} avatar={avatarFor(member)} /><div><strong>{member.preferredName || member.displayName}</strong>
             <small>{accessLevelLabel(memberAccess(member))} · {ageBandLabel(memberAgeBand(member))}</small>
@@ -284,19 +314,23 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
           {member.role !== "owner" && mayManage(member) &&
             <button onClick={() => { setSelectedMemberId(member.id); setManagedAvatar(avatarFor(member)); setMode("manage"); }}>Manage</button>}
           {relationshipState === "paused" && member.role !== "owner" && mayManage(member) &&
-            <button disabled={busy} onClick={() => void restoreMember(member.id)}>Restore access</button>}
-          {relationshipState === "ready" && member.role !== "owner" &&
-            <button onClick={() => { setSelectedMemberId(member.id); setMode("invite"); }}>Invite</button>}
+            <button disabled={stableMutation.isPending(`restore:${member.id}`)} onClick={() => void restoreMember(member.id)}>
+              {stableMutation.isPending(`restore:${member.id}`) ? "Restoring access…" : "Restore access"}</button>}
+          {relationshipState === "ready" && canInviteMember &&
+            <button onClick={() => { setSelectedMemberId(member.id); setInviteRequestKey(clientKey()); setMode("invite"); }}>Invite</button>}
           {(relationshipState === "invite_expired" || relationshipState === "invite_revoked") &&
-            memberInvite(member) && <button disabled={busy} onClick={() => void regenerate(memberInvite(member)!)}>
-              Invite again</button>}
+            canInviteMember && memberInvite(member) &&
+            <button disabled={stableMutation.isPending(`reinvite:${member.inviteId}`)} onClick={() => void regenerate(memberInvite(member)!)}>
+              {stableMutation.isPending(`reinvite:${member.inviteId}`) ? "Creating invite…" : "Invite again"}</button>}
           {relationshipState === "invite_pending" && memberInvite(member) &&
-            <div className="row-actions"><button disabled={busy} onClick={() => void regenerate(memberInvite(member)!)}>Resend</button>
-              <button disabled={busy} onClick={() => void revoke(member.inviteId!)}>Revoke</button></div>}
+            <div className="row-actions"><button disabled={stableMutation.isPending(`reinvite:${member.inviteId}`)} onClick={() => void regenerate(memberInvite(member)!)}>
+              {stableMutation.isPending(`reinvite:${member.inviteId}`) ? "Resending invite…" : "Resend"}</button>
+              <button disabled={stableMutation.isPending(`revoke:${member.inviteId}`)} onClick={() => void revoke(member.inviteId!)}>
+                {stableMutation.isPending(`revoke:${member.inviteId}`) ? "Revoking invite…" : "Revoke"}</button></div>}
         </article>;
         })}</div>
         <div className="row-actions"><button className="primary" onClick={() => { setNewMemberKey(clientKey()); setNewAccessLevel("household_member"); setMode("add"); }}><CradleIcon name="add" size="sm" decorative /> Add family member</button>
-          <button onClick={() => { setSelectedMemberId(""); setMode("invite"); }}>General invite</button><button onClick={onClose}>Done</button></div></section>
+          <button onClick={() => { setSelectedMemberId(""); setInviteRequestKey(clientKey()); setMode("invite"); }}>General invite</button><button onClick={onClose}>Done</button></div></section>
       <section className="dashboard-card"><h2>Join requests</h2>
         {!requests.length && <div className="empty-action"><p>No join requests are waiting.</p><button onClick={onClose}>Back to Dashboard</button></div>}
         {requests.map((request) => <article className="join-request" key={request.id}><p><strong>{request.displayName}</strong> wants to join
@@ -344,7 +378,8 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
           {MEMBER_AGE_BANDS.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label></>}
       <label><span>Invitation expires</span><select name="expiry" defaultValue="7_days">
         <option value="24_hours">24 hours</option><option value="7_days">7 days</option><option value="30_days">30 days</option></select></label>
-      <div className="row-actions"><button className="primary" disabled={busy}>{busy ? "Creating…" : "Create invitation"}</button>
+      <div className="row-actions"><button className="primary" disabled={stableMutation.isPending(`create-invite:${selectedMemberId || "household"}`)}>
+        {stableMutation.isPending(`create-invite:${selectedMemberId || "household"}`) ? "Creating invite…" : "Create invitation"}</button>
         <button type="button" onClick={() => setMode("overview")}>Cancel</button><button type="button" onClick={onClose}>Back to Dashboard</button></div>
     </form>}
 
@@ -382,7 +417,10 @@ export function FamilyPanel({ dashboard, onClose, onChanged, initialMemberId }: 
         <button onClick={() => { setCreatedMember(null); setNewMemberKey(clientKey()); setNewAccessLevel("household_member"); setMode("add"); }}>Add another</button>
         <button onClick={() => { setCreatedMember(null); setMode("overview"); }}>Invite later</button><button onClick={onClose}>Done</button></div>}
       {latestInvite && <><dl><div><dt>Private invite link</dt><dd className="break-value">{latestInvite.inviteUrl}</dd></div>
-        <div><dt>Joining code</dt><dd className="invite-code">{latestInvite.code}</dd></div></dl>
+        <div><dt>Joining code</dt><dd className="invite-code">{latestInvite.code}</dd></div>
+        <div><dt>Delivery</dt><dd>{latestInvite.deliveryStatus === "failed" ? "Delivery failed — the link is still ready to share" :
+          latestInvite.deliveryStatus === "pending" ? "Delivery pending" : latestInvite.deliveryStatus === "succeeded" ?
+            "Delivered" : "Not sent automatically — copy or share it manually"}</dd></div></dl>
         <div className="choice-actions"><button onClick={() => void copy(latestInvite.inviteUrl || "").then(() => setNotice("Invite link copied."))}>Copy link</button>
           <button onClick={() => void copy(latestInvite.code || "").then(() => setNotice("Joining code copied."))}>Copy code</button>
           <button onClick={() => void revealQr()}>Show QR code</button>

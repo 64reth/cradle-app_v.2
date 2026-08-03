@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiResponseError, TransportError } from "../src/api";
 import {
   completeSupabaseOAuth, exchangeSupabaseAccessToken, hasSupabaseOAuthCallback,
-  startSupabaseOAuth,
+  rememberSupabaseInvite, startSupabaseOAuth, takeSupabaseInvite,
 } from "../src/supabaseAuth";
 
 const supabaseAuth = vi.hoisted(() => ({
@@ -28,6 +28,13 @@ describe("Supabase Cradle exchange", () => {
     expect(hasSupabaseOAuthCallback("https://cradle.test/?code=provider-code")).toBe(true);
     expect(hasSupabaseOAuthCallback("https://cradle.test/?error=invalid_request&error_code=bad_oauth_state")).toBe(true);
     expect(hasSupabaseOAuthCallback("https://cradle.test/")).toBe(false);
+  });
+
+  it("retains an invitation across the provider redirect exactly once", () => {
+    rememberSupabaseInvite("private-invite-token");
+
+    expect(takeSupabaseInvite()).toBe("private-invite-token");
+    expect(takeSupabaseInvite()).toBeNull();
   });
 
   it("surfaces bad OAuth state instead of leaving the callback loading", async () => {

@@ -31,7 +31,7 @@ export async function onRequestPost({ request, env, params }: Context) {
       return success({ invite: {
         id: existing.id, targetMemberId: existing.targetMemberId, inviteType: existing.targetMemberId ? "profile" : "household",
         token, code, inviteUrl: `${new URL(request.url).origin}/invite/${token}`, expiresAt: existing.expiresAt,
-        status: "active"
+        status: "active", deliveryStatus: "not_requested"
       } }, requestId);
     }
     const invite = await createHouseholdInvite(request, db, identity, {

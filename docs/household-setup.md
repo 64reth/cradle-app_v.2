@@ -1,5 +1,7 @@
 # Household setup
 
+The valid persisted setup transition sequence is defined by the [Household Domain lifecycle](./household-domain.md). This document describes its product experience.
+
 ## State machine
 
 The server persists:

@@ -9,6 +9,7 @@ import { householdRoutineAccess } from "./setup";
 import { countIncompleteTasks, dailyProgress, dateInTimezone, householdTasks } from "./tasks";
 import type { RoutineAssignmentMode } from "../../shared/assignments";
 import { getOrCreateDailyMoments } from "./together";
+import { familyMembers } from "./household/members/index";
 
 export type DashboardMember = {
   id: string; displayName: string; preferredName: string | null; role: string;
@@ -78,19 +79,9 @@ export async function dashboardData(db: D1Database, identity: Identity) {
   const leadership = identityAccessLevel(identity) === "household_admin";
   const [membersResult, roomsResult, petsResult, routines, pendingInvites, joinRequests, openSuggestions,
     upcomingEvents, eventCount] = await Promise.all([
-    db.prepare(`SELECT m.id, m.display_name AS displayName, m.preferred_name AS preferredName,
-      m.role, m.access_level AS accessLevel, m.age_band AS ageBand, m.lifecycle_state AS lifecycleState,
-      m.relationship_label AS relationshipLabel, CASE WHEN m.account_id IS NULL THEN 0 ELSE 1 END AS hasAccount,
-      c.id AS avatarId, c.fur_palette_key AS avatarFurPaletteKey,
-      c.patch_primary_palette_key AS avatarPatchPrimaryPaletteKey,
-      c.patch_secondary_palette_key AS avatarPatchSecondaryPaletteKey,
-      c.expression_key AS avatarExpressionKey
-      FROM members m
-      LEFT JOIN member_companions c ON c.household_id = m.household_id AND c.member_id = m.id AND c.is_active = 1
-      WHERE m.household_id = ? AND (m.is_active = 1 OR m.lifecycle_state = 'suspended')
-        AND m.lifecycle_state != 'left'
-      ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'parent_admin' THEN 1 WHEN 'adult' THEN 2 ELSE 3 END, m.created_at`)
-      .bind(identity.householdId).all<DashboardMember>(),
+    familyMembers(db, identity.householdId).then((result) => ({
+      ...result, results: result.results as DashboardMember[]
+    })),
     db.prepare(`SELECT id, name, room_type AS roomType FROM rooms
       WHERE household_id = ? AND is_active = 1 ORDER BY display_order, created_at`).bind(identity.householdId).all<DashboardRoom>(),
     db.prepare(`SELECT id, name, pet_type AS petType FROM pets

@@ -1,5 +1,7 @@
 # Household Systems
 
+Household participant identity and capabilities come from the [Household Domain](./household-domain.md); this document owns only routine-specific behaviour.
+
 Household Systems are Cradle’s internal operational model. Ordinary household users interact with Rooms, Pets, routines, plain frequencies, and responsibility—not a database-shaped System authoring form.
 
 Each generated System stores a household-scoped name, Room or Pet context, active/paused/archived lifecycle, frequency intent, estimated duration, definition of done, notes, deterministic order, ordered steps, and source provenance. Its canonical assignment separately records Rotation, One person, Shared team, or Decide later.

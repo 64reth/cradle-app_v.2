@@ -36,7 +36,7 @@ export async function onRequestPost({ request, env, params }: Context) {
       let results;
       try {
         results = await db.batch([
-          db.prepare(`UPDATE members SET account_id = ?, lifecycle_state = 'active',
+          db.prepare(`UPDATE members SET account_id = ?, lifecycle_state = 'active', is_active = 1,
             pin_hash = NULL, pin_salt = NULL, updated_at = ?
             WHERE household_id = ? AND id = ? AND account_id IS NULL`)
             .bind(identity.accountId, now, invite.householdId, invite.targetMemberId),

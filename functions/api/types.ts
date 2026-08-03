@@ -3,6 +3,10 @@ export type CradleEnv = {
   APP_ENV?: string;
   API_VERSION?: string;
   APP_VERSION?: string;
+  BUILD_SHA?: string;
+  BUILD_TIME?: string;
+  VALIDATED_TEST_COUNT?: string;
+  EXPECTED_MIGRATION?: string;
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
   SUPABASE_REDIRECT_URL?: string;

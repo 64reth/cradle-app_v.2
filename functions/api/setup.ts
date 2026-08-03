@@ -1,13 +1,14 @@
-import { identityAccessLevel, type Identity } from "./auth";
+import type { Identity } from "./auth";
 import { authorizationError, validationError } from "./http";
 import type { JsonRecord } from "./types";
+import { actorAccessLevel, type HouseholdSetupStep } from "../../shared/household-domain";
 
-export type SetupStep = "leadership" | "members" | "rooms" | "pets" | "companion" | "review" | "complete";
+export type SetupStep = HouseholdSetupStep;
 export type HouseholdRoutineAccess = "manage" | "view_active" | "none";
 
 export function householdRoutineAccess(identity: Identity): HouseholdRoutineAccess {
-  if (identityAccessLevel(identity) === "household_admin") return "manage";
-  if (identityAccessLevel(identity) === "household_member") return "view_active";
+  if (actorAccessLevel(identity) === "household_admin") return "manage";
+  if (actorAccessLevel(identity) === "household_member") return "view_active";
   return "none";
 }
 

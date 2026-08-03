@@ -1,5 +1,7 @@
 # Family Members and Invitations
 
+The authoritative entity, lifecycle, permission, and query rules are defined in [Household Domain architecture](./household-domain.md). This document describes the user-facing flow and must not redefine those invariants.
+
 ## Member and account separation
 
 A household Member is the durable person-in-the-home record. A `user_account` is authentication identity. A Member may exist without an account and an account claims at most one Member in a household.

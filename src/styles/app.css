@@ -660,3 +660,16 @@ details[open] summary { margin-bottom: .75rem; }
   .mission-row-actions { justify-content: flex-start; width: 100%; }
   .mission-row-actions button { flex: 1 1 auto; }
 }
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-md, 1rem);
+  margin-block: 1rem;
+}
+.health-grid .card { margin: 0; }
+.health-status { text-transform: capitalize; font-weight: 700; }
+.health-healthy { border-color: var(--color-success, #2f855a); }
+.health-degraded { border-color: var(--color-warning, #b7791f); }
+.health-unavailable { border-color: var(--color-error, #c53030); }
+.health-unknown { border-style: dashed; }
+.operations-health small { display: block; }

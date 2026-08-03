@@ -1,5 +1,7 @@
 # Authentication and operations foundation
 
+Household/account identity boundaries and the protected Alpha Health design are owned by [Household Domain architecture](./household-domain.md).
+
 ## Provider architecture
 
 Cradle keeps authentication and household membership separate:

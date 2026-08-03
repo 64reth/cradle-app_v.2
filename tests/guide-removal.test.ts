@@ -20,11 +20,12 @@ describe("retired synthetic household identity", () => {
 
   it("keeps avatars attached to real members and out of family participation data", () => {
     const dashboard = read("functions/api/routines.ts");
-    const members = read("functions/api/household/members/index.ts");
+    const members = read("functions/domain/household/queries.ts");
     const events = read("functions/api/household/events/index.ts");
     const invitations = read("functions/api/household/invites/index.ts");
-    expect(dashboard).toContain("LEFT JOIN member_companions");
-    expect(dashboard).toContain("c.id AS avatarId");
+    expect(dashboard).toContain("familyMembers(db, identity.householdId)");
+    expect(members).toContain("LEFT JOIN member_companions");
+    expect(members).toContain("c.id AS avatarId");
     expect(members).toContain("m.id");
     expect(events).not.toMatch(/\bcompanions\b/i);
     expect(invitations).not.toMatch(/\bcompanions\b/i);

@@ -29,6 +29,8 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="eyebrow">Something needs attention</p>
             <h1>Cradle could not load this view.</h1>
             <p>Refresh the page and try again.</p>
+            <div className="row-actions"><button className="primary" onClick={() => window.location.reload()}>Refresh Cradle</button>
+              <a className="button-link" href="/">Return home</a></div>
           </section>
         </main>
       );

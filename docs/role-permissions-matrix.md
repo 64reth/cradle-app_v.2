@@ -1,5 +1,7 @@
 # Family access permissions matrix
 
+This is a product-facing reference. Executable capability decisions are owned by the [Household Domain permission policy](./household-domain.md).
+
 | Capability | Owner | Parent/Admin | Adult | Child |
 | --- | --- | --- | --- | --- |
 | Complete incomplete initial setup | Yes | No | No | No |
