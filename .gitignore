@@ -12,3 +12,4 @@ coverage/
 .dev.vars
 .dev.vars.*
 npm-debug.log*
+artifacts/viewport/

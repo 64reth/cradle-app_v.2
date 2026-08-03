@@ -44,15 +44,30 @@ describe("Supabase Cradle exchange", () => {
     expect(supabaseAuth.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 
+  it("maps a disabled provider callback to a safe Cradle error", async () => {
+    window.history.replaceState({}, "", "/?error=server_error&error_description=Unsupported%20provider%3A%20provider%20is%20not%20enabled");
+    await expect(completeSupabaseOAuth()).rejects.toThrow("That sign-in option is not available yet. Continue with Google or Email.");
+    expect(supabaseAuth.exchangeCodeForSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects disabled Apple before constructing or navigating to a provider URL", async () => {
+    const navigate = vi.fn();
+    await expect(startSupabaseOAuth("apple", navigate)).rejects.toThrow("Apple Sign In is not available yet");
+    expect(supabaseAuth.signInWithOAuth).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("lets the Supabase client own OAuth initiation without supplying custom state", async () => {
     supabaseAuth.signInWithOAuth.mockResolvedValueOnce({ data: { provider: "google", url: "https://provider.test" }, error: null });
 
-    await startSupabaseOAuth("google");
+    const navigate = vi.fn();
+    await startSupabaseOAuth("google", navigate);
 
     expect(supabaseAuth.signInWithOAuth).toHaveBeenCalledWith({
       provider: "google",
-      options: { redirectTo: "http://localhost:3000/" },
+      options: { redirectTo: "http://localhost:3000/", skipBrowserRedirect: true },
     });
+    expect(navigate).toHaveBeenCalledWith("https://provider.test");
     expect(JSON.stringify(supabaseAuth.signInWithOAuth.mock.calls[0])).not.toContain("state");
   });
 

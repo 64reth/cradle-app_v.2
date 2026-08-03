@@ -9,12 +9,15 @@ import { MemberSelector } from "./MemberSelector";
 import { CradleIcon } from "./components/ui/CradleIcon";
 import { getRoomIconName } from "./iconMappings";
 import { MotionPage } from "./motion";
+import { RoomsSpaces, type RoomSummary } from "./RoomsSpaces";
 
-type LibraryData = { routines: RoutineSummary[]; members: DashboardMember[]; canManage: boolean };
+type LibraryData = { routines: RoutineSummary[]; members: DashboardMember[]; rooms: Pick<RoomSummary, "id" | "name" | "roomType">[]; canManage: boolean };
 type RoutineDetail = {
   id: string; name: string; purpose: string; status: "active" | "paused" | "archived"; frequency: RoutineFrequency;
   customFrequencyNote: string | null;
   roomName: string | null; petName: string | null; ownerMemberId: string; ownerName: string;
+  roomId: string | null; roomType: RoomSummary["roomType"] | null; category: string;
+  updatedAt: string; allocationWarning: string | null;
   note: string | null; definitionOfDone: string; estimatedMinutes: number;
   sourceKind: "template" | "custom"; sourceTemplateKey: string | null; templateCustomised: boolean;
   rotationEnabled: boolean; assignmentMode: RoutineAssignmentMode; assignedMemberId: string | null;
@@ -22,8 +25,8 @@ type RoutineDetail = {
   rotationMembers: Array<{ memberId: string; displayName: string }>;
 };
 
-function RoutineEditor({ routine, members, canManage, close, saved, removed }: {
-  routine: RoutineDetail; members: DashboardMember[]; canManage: boolean; close: () => void;
+function RoutineEditor({ routine, members, rooms = [], canManage, close, saved, removed }: {
+  routine: RoutineDetail; members: DashboardMember[]; rooms: LibraryData["rooms"]; canManage: boolean; close: () => void;
   saved: (routine: RoutineDetail) => Promise<boolean>; removed: () => Promise<boolean>;
 }) {
   const readOnly = !canManage || routine.status === "archived";
@@ -34,6 +37,7 @@ function RoutineEditor({ routine, members, canManage, close, saved, removed }: {
     customFrequencyNote: routine.customFrequencyNote || "",
     assignmentMode: routine.assignmentMode,
     participantMemberIds: routine.rotationMembers.map(({ memberId }) => memberId)
+    , roomId: routine.roomId || ""
   });
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [savedState, setSavedState] = useState(false);
   async function submit(event: FormEvent) {
@@ -53,6 +57,12 @@ function RoutineEditor({ routine, members, canManage, close, saved, removed }: {
       <span className={`routine-status ${routine.status}`}>{routine.status}</span></div>
     {readOnly && <p className="soft-notice">{routine.status === "archived" ? "This archived routine is kept as household history."
       : "You can view active routines. Household leaders can make changes."}</p>}
+    <dl className="routine-allocation-summary"><div><dt>Assigned to</dt><dd>{routine.assignmentMode === "one_person"
+      ? members.find(({ id }) => id === routine.assignedMemberId)?.displayName || "Unassigned"
+      : routine.rotationMembers.map(({ displayName }) => displayName).join(", ") || "Decide later"}</dd></div>
+      <div><dt>Room or space</dt><dd>{routine.roomName || "Whole household"}</dd></div>
+      <div><dt>Source</dt><dd>{routine.sourceKind === "template" ? "Template" : "Manual"}</dd></div>
+      <div><dt>Last updated</dt><dd>{routine.updatedAt ? new Date(routine.updatedAt).toLocaleDateString() : "Not recorded"}</dd></div></dl>
     <form onSubmit={submit}><fieldset className="friendly-edit-fields" disabled={readOnly || busy}>
       <label><span>Routine name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <div className="routine-edit-grid"><label><span>How often?</span><select value={form.frequency}
@@ -69,7 +79,11 @@ function RoutineEditor({ routine, members, canManage, close, saved, removed }: {
           value={form.assignedMemberId} onChange={(assignedMemberId) => setForm({ ...form, assignedMemberId })} />}
         <label><span>Routine is</span><select value={form.status}
           onChange={(event) => setForm({ ...form, status: event.target.value as "active" | "paused" })}>
-          <option value="active">Active</option><option value="paused">Paused</option></select></label></div>
+          <option value="active">Active</option><option value="paused">Paused</option></select></label>
+        <label><span>Assigned room or space</span><select value={form.roomId} onChange={(event) => setForm({ ...form, roomId: event.target.value })}>
+          <option value="">Whole household</option>{rooms.map((room) => <option value={room.id} key={room.id}>{room.name}</option>)}</select></label>
+        <div><span>Routine category</span><strong>{(routine.category || "other").replace("_", " ")}</strong><small>Derived from this routine’s source and room.</small></div></div>
+      {routine.allocationWarning && <p className="soft-notice" role="status">{routine.allocationWarning} You can change the room, change its type in Rooms &amp; spaces, or keep this assignment intentionally.</p>}
       {(form.assignmentMode === "rotation" || form.assignmentMode === "shared_team") &&
         <MemberSelector members={members} multiple values={form.participantMemberIds}
           label={form.assignmentMode === "rotation" ? "Rotation participants" : "Shared team"}
@@ -93,6 +107,8 @@ function RoutineEditor({ routine, members, canManage, close, saved, removed }: {
         <dl><div><dt>Purpose</dt><dd>{routine.purpose}</dd></div><div><dt>Finished means</dt><dd>{routine.definitionOfDone}</dd></div>
           <div><dt>Estimated time</dt><dd>{routine.estimatedMinutes} minutes</dd></div>
           <div><dt>How it started</dt><dd>{routine.sourceKind === "template" ? "Cradle suggestion" : "Made by your household"}</dd></div></dl>
+        <dl><div><dt>Last updated</dt><dd>{routine.updatedAt ? new Date(routine.updatedAt).toLocaleDateString() : "Not recorded"}</dd></div>
+          <div><dt>Assigned space</dt><dd>{routine.roomName || "Whole household"}</dd></div></dl>
         <p>Today’s dated household missions are generated from this Routine.</p>
       </details>
       {savedState && <p role="status" className="success-message">Routine saved.</p>}
@@ -114,6 +130,7 @@ export function SystemsLibrary({ navigate, signOut, addRoutine }: {
   navigate: (view: AuthenticatedView) => void; signOut: () => void; addRoutine: () => void;
 }) {
   const [data, setData] = useState<LibraryData | null>(null); const [filter, setFilter] = useState<"active" | "paused" | "archived" | "all">("active");
+  const [showRooms, setShowRooms] = useState(false);
   const [editing, setEditing] = useState<RoutineDetail | null>(null); const [error, setError] = useState(""); const [loading, setLoading] = useState(true);
   const load = useCallback(async (status: "active" | "paused" | "archived" | "all"): Promise<boolean> => {
     setError(""); setLoading(true);
@@ -129,8 +146,10 @@ export function SystemsLibrary({ navigate, signOut, addRoutine }: {
     try { const result = await api<{ routine: RoutineDetail }>(`/api/household/systems/${id}`); setEditing(result.routine); }
     catch (reason) { setError(failureMessage(reason)); }
   }
+  if (showRooms && data) return <div className="dashboard-shell"><Navigation active="systems" navigate={navigate} signOut={signOut} />
+    <MotionPage motionKey="rooms-spaces" className="motion-page"><RoomsSpaces members={data.members} close={() => setShowRooms(false)} /></MotionPage></div>;
   if (editing && data) return <div className="dashboard-shell"><Navigation active="systems" navigate={navigate} signOut={signOut} />
-    <MotionPage motionKey={`routine-${editing.id}`} className="motion-page"><RoutineEditor routine={editing} members={data.members} canManage={data.canManage}
+    <MotionPage motionKey={`routine-${editing.id}`} className="motion-page"><RoutineEditor routine={editing} members={data.members} rooms={data.rooms} canManage={data.canManage}
       close={() => setEditing(null)} saved={async (routine) => { setEditing(routine); return load(filter); }}
       removed={async () => { setEditing(null); return load(filter); }} /></MotionPage></div>;
   const grouped = new Map<string, RoutineSummary[]>();
@@ -142,7 +161,7 @@ export function SystemsLibrary({ navigate, signOut, addRoutine }: {
     <MotionPage motionKey="systems" className="motion-page">
     <section className="routine-library-hero"><div><p className="eyebrow">The way your home runs</p><h1>Routines</h1>
       <p>Cradle has made a sensible first draft from your Rooms and Pets. Review it, adjust it, or add something unique to your family.</p></div>
-      {data?.canManage && <button className="primary" onClick={addRoutine}><CradleIcon name="add" size="sm" decorative /> Add a custom routine</button>}</section>
+      {data?.canManage && <div className="row-actions"><button onClick={() => setShowRooms(true)}>Rooms &amp; spaces</button><button className="primary" onClick={addRoutine}><CradleIcon name="add" size="sm" decorative /> Add a custom routine</button></div>}</section>
     <section className="routine-library dashboard-card">
       <div className="friendly-filters" aria-label="Routine filters">{(["active", "paused", "archived", "all"] as const).map((status) =>
         <button className={filter === status ? "primary" : ""} key={status} onClick={() => void chooseFilter(status)}>

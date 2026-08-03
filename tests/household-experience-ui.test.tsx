@@ -153,10 +153,11 @@ describe("Phase 4.3 household experience", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("locks Family Status to an avatar-led 68/32 layout and preserves it on mobile", async () => {
+  it("keeps desktop Family Status avatar-led and uses contained mobile grids", async () => {
     const css = await import("node:fs").then(({ readFileSync }) => readFileSync("src/styles/app.css", "utf8"));
     expect(css).toMatch(/family-status-card\s*\{[\s\S]*grid-template-rows:\s*68% 32%/);
-    expect(css).toMatch(/@media \(max-width: 760px\)[\s\S]*family-status-card\s*\{[\s\S]*grid-template-rows:\s*66% 34%/);
+    expect(css).toMatch(/@media \(max-width: 760px\)[\s\S]*family-status-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    expect(css).not.toMatch(/family-status-grid\s*\{[\s\S]{0,180}overflow-x:\s*auto/);
     expect(css).toMatch(/calendar-time-grid[\s\S]*grid-template-columns: 1fr 1fr/);
     expect(css).toMatch(/task-celebration[\s\S]*animation:\s*cradle-task-joy 950ms/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*task-celebration\s*\{\s*animation:\s*none/);

@@ -150,6 +150,7 @@ describe("authentication migration", () => {
       "weekly_meal_plan_slots", "weekly_meal_plans"]);
   });
 
+
   it("enforces foreign keys", () => {
     expect(() => sqlite(`
       PRAGMA foreign_keys = ON;
@@ -256,12 +257,12 @@ describe("authentication migration", () => {
     sqlite(`
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
-      INSERT INTO rooms VALUES ('r1', 'h1', ' Kitchen ', NULL, 0, 1, 'now', 'now', 'kitchen');
-      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r1', 'h1', ' Kitchen ', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
       UPDATE rooms SET is_active = 0 WHERE household_id = 'h1';
-      INSERT INTO rooms VALUES ('r3', 'h1', 'Kitchen', NULL, 1, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r3', 'h1', 'Kitchen', NULL, 1, 1, 'now', 'now', 'kitchen');
     `);
-    expect(() => sqlite("INSERT INTO rooms VALUES ('r4', 'h1', 'kitchen', NULL, 2, 1, 'now', 'now', 'kitchen');")).toThrow();
+    expect(() => sqlite("INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r4', 'h1', 'kitchen', NULL, 2, 1, 'now', 'now', 'kitchen');")).toThrow();
   });
 
   it("accepts every supported Pet type and optional fields", () => {
@@ -457,7 +458,7 @@ describe("authentication migration", () => {
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, is_active, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 1, 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, is_active, created_at, updated_at) VALUES ('m2', 'h1', 'Sam', 'adult', 1, 'now', 'now');
-      INSERT INTO rooms VALUES ('r1', 'h1', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r1', 'h1', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
       INSERT INTO pets VALUES ('p1', 'h1', 'Tori', 'cat', NULL, NULL, 1, 'now', 'now');
       INSERT INTO household_systems (id, household_id, name, purpose, pet_id, owner_member_id, status,
         frequency_key, estimated_minutes, definition_of_done, display_order, source_kind, source_template_key,
@@ -479,7 +480,7 @@ describe("authentication migration", () => {
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h2', 'Two', 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m2', 'h2', 'Sam', 'owner', 'now', 'now');
-      INSERT INTO rooms VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r2', 'h2', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
       INSERT INTO pets VALUES ('p2', 'h2', 'Tori', 'cat', NULL, NULL, 1, 'now', 'now');
     `);
     const insert = (room: string, pet: string, owner: string) => `PRAGMA foreign_keys = ON;
@@ -511,8 +512,8 @@ describe("authentication migration", () => {
     sqlite(`
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, created_at, updated_at) VALUES ('m1', 'h1', 'Alex', 'owner', 'now', 'now');
-      INSERT INTO rooms VALUES ('r1', 'h1', 'Bedroom 1', NULL, 0, 1, 'now', 'now', 'bedroom');
-      INSERT INTO rooms VALUES ('r2', 'h1', 'Bedroom 2', NULL, 1, 1, 'now', 'now', 'bedroom');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r1', 'h1', 'Bedroom 1', NULL, 0, 1, 'now', 'now', 'bedroom');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r2', 'h1', 'Bedroom 2', NULL, 1, 1, 'now', 'now', 'bedroom');
       INSERT INTO household_systems (id, household_id, name, purpose, room_id, owner_member_id, status, frequency_key,
         estimated_minutes, definition_of_done, display_order, source_kind, source_template_key, source_template_version, created_at, updated_at)
         VALUES ('sys1', 'h1', 'Bedroom clean', 'Clean', 'r1', 'm1', 'active', 'weekly', 10, 'Ready', 0,
@@ -605,7 +606,7 @@ describe("authentication migration", () => {
         ('teen', 'legacy', 'Tyrel', 'child', 'managed', 'teen', 'now', 'now'),
         ('child', 'legacy', 'Taryn', 'child', 'managed', 'child', 'now', 'now'),
         ('young', 'legacy', 'Tia', 'child', 'managed', 'dependent', 'now', 'now');
-      INSERT INTO rooms VALUES ('bedroom', 'legacy', 'Children bedroom', NULL, 0, 1, 'now', 'now', 'bedroom');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('bedroom', 'legacy', 'Children bedroom', NULL, 0, 1, 'now', 'now', 'bedroom');
       INSERT INTO household_systems
         (id, household_id, name, purpose, room_id, owner_member_id, status, frequency_key,
           estimated_minutes, definition_of_done, display_order, source_kind, client_key,
@@ -644,7 +645,7 @@ describe("authentication migration", () => {
       INSERT INTO households (id, name, created_at, updated_at) VALUES ('h1', 'One', 'now', 'now');
       INSERT INTO members (id, household_id, display_name, role, created_at, updated_at, account_id)
         VALUES ('owner', 'h1', 'Alex', 'owner', 'now', 'now', 'a1');
-      INSERT INTO rooms VALUES ('r1', 'h1', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
+      INSERT INTO rooms (id, household_id, name, description, display_order, is_active, created_at, updated_at, room_type) VALUES ('r1', 'h1', 'Kitchen', NULL, 0, 1, 'now', 'now', 'kitchen');
       INSERT INTO household_invites
         (id, household_id, token_hash, short_code_hash, invite_type, invited_role,
           created_by_member_id, expires_at, max_uses, use_count, created_at, updated_at)

@@ -2,13 +2,15 @@ import type { Identity } from "./auth";
 import { ApiError, validationError } from "./http";
 import { optionalText, requireHouseholdManager } from "./setup";
 import type { JsonRecord } from "./types";
-import { isRoutineFrequency, type RoutineFrequency } from "../../shared/routines";
+import { isRoomType, isRoutineFrequency, routineCategory, routineRoomMismatch, type RoomType, type RoutineFrequency } from "../../shared/routines";
 import { isRoutineAssignmentMode, type RoutineAssignmentMode } from "../../shared/assignments";
 
 export type RoutineDetail = {
   id: string; name: string; purpose: string; status: string; frequency: RoutineFrequency;
   customFrequencyNote: string | null;
   roomId: string | null; roomName: string | null; petId: string | null; petName: string | null;
+  roomType: RoomType | null; category: string; updatedAt: string;
+  allocationWarning: string | null;
   ownerMemberId: string; ownerName: string; note: string | null; definitionOfDone: string;
   estimatedMinutes: number; sourceKind: string; sourceTemplateKey: string | null;
   templateCustomised: boolean; rotationEnabled: boolean; assignmentMode: RoutineAssignmentMode;
@@ -20,12 +22,12 @@ export type RoutineDetail = {
 export async function getRoutineDetail(db: D1Database, householdId: string, systemId: string): Promise<RoutineDetail> {
   const routine = await db.prepare(`SELECT s.id, s.name, s.purpose, s.status, s.frequency_key AS frequency,
     s.custom_frequency_note AS customFrequencyNote,
-    s.room_id AS roomId, r.name AS roomName, s.pet_id AS petId, p.name AS petName,
+    s.room_id AS roomId, r.name AS roomName, r.room_type AS roomType, s.pet_id AS petId, p.name AS petName,
     s.owner_member_id AS ownerMemberId, m.display_name AS ownerName, s.notes AS note,
     s.definition_of_done AS definitionOfDone, s.estimated_minutes AS estimatedMinutes,
     s.source_kind AS sourceKind, s.source_template_key AS sourceTemplateKey,
     s.template_customised AS templateCustomised, s.rotation_enabled AS rotationEnabled,
-    a.assignment_mode AS assignmentMode, a.assigned_member_id AS assignedMemberId
+    a.assignment_mode AS assignmentMode, a.assigned_member_id AS assignedMemberId, s.updated_at AS updatedAt
     FROM household_systems s
     JOIN routine_assignments a ON a.household_id = s.household_id AND a.system_id = s.id
     JOIN members m ON m.household_id = s.household_id AND m.id = s.owner_member_id
@@ -44,6 +46,8 @@ export async function getRoutineDetail(db: D1Database, householdId: string, syst
   ]);
   return {
     ...routine, templateCustomised: Boolean(routine.templateCustomised), rotationEnabled: Boolean(routine.rotationEnabled),
+    category: routineCategory(String(routine.name), (routine.roomType || null) as RoomType | null, String(routine.sourceTemplateKey || "")),
+    allocationWarning: routineRoomMismatch(String(routine.name), (routine.roomType || null) as RoomType | null),
     steps: steps.results, rotationMembers: rotationMembers.results
   } as RoutineDetail;
 }
@@ -56,6 +60,12 @@ export async function parseRoutineEdit(body: JsonRecord, db: D1Database, identit
   }
   if (!isRoutineFrequency(body.frequency)) {
     throw validationError("Please check this routine.", { frequency: "Choose how often it happens" });
+  }
+  const roomId = typeof body.roomId === "string" && body.roomId ? body.roomId : null;
+  if (roomId) {
+    const room = await db.prepare(`SELECT room_type AS roomType FROM rooms
+      WHERE household_id = ? AND id = ? AND is_active = 1`).bind(identity.householdId, roomId).first<{ roomType: string }>();
+    if (!room || !isRoomType(room.roomType)) throw validationError("Please check this routine.", { roomId: "Choose an active room" });
   }
   if (body.status !== "active" && body.status !== "paused") {
     throw validationError("Please check this routine.", { status: "Choose active or paused" });
@@ -89,7 +99,7 @@ export async function parseRoutineEdit(body: JsonRecord, db: D1Database, identit
     throw validationError("Please check this routine.", { participantMemberIds: "Choose at least two people for a Shared team" });
   }
   return {
-    name: name.trim(), frequency: body.frequency, status: body.status, assignmentMode,
+    name: name.trim(), frequency: body.frequency, status: body.status, assignmentMode, roomId,
     assignedMemberId: assignmentMode === "one_person" ? assignedMemberId : null,
     participantMemberIds: assignmentMode === "rotation" || assignmentMode === "shared_team"
       ? participantMemberIds as string[] : [],

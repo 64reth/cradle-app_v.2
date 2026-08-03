@@ -1,11 +1,13 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ApiResponseError, TransportError, type Envelope } from "./api";
+import { availableAuthProviders, requireAvailableAuthProvider, type OAuthProviderId } from "./authProviders";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const redirectUrl = import.meta.env.VITE_SUPABASE_REDIRECT_URL as string | undefined;
 const storageKey = "cradle-supabase-auth";
 const pendingInviteKey = "cradle-supabase-pending-invite";
+const providerErrorKey = "cradle-supabase-provider-error";
 let client: SupabaseClient | undefined;
 
 export type SupabaseExchangeResult = {
@@ -50,6 +52,16 @@ export function takeSupabaseInvite(): string | null {
   return reference;
 }
 
+export function rememberAuthProviderError(message: string): void {
+  window.sessionStorage.setItem(providerErrorKey, message.slice(0, 240));
+}
+
+export function takeAuthProviderError(): string | null {
+  const message = window.sessionStorage.getItem(providerErrorKey);
+  if (message) window.sessionStorage.removeItem(providerErrorKey);
+  return message;
+}
+
 function configured(): { url: string; key: string } {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error("Sign-in is not configured yet.");
   return { url: supabaseUrl.replace(/\/$/, ""), key: supabaseAnonKey };
@@ -81,15 +93,19 @@ function safeRedirect(): string {
   } catch { return fallback; }
 }
 
-export async function startSupabaseOAuth(provider: "google" | "apple"): Promise<void> {
-  const { error } = await supabase().auth.signInWithOAuth({
+export async function startSupabaseOAuth(provider: OAuthProviderId,
+  navigate: (url: string) => void = (url) => window.location.assign(url)): Promise<void> {
+  requireAvailableAuthProvider(provider);
+  const { data, error } = await supabase().auth.signInWithOAuth({
     provider,
-    options: { redirectTo: safeRedirect() },
+    options: { redirectTo: safeRedirect(), skipBrowserRedirect: true },
   });
-  if (error) throw error;
+  if (error || !data.url) throw new Error(`${provider === "apple" ? "Apple" : "Google"} Sign In is not available right now. Please choose another sign-in option.`);
+  navigate(data.url);
 }
 
 export async function requestSupabaseOtp(email: string): Promise<void> {
+  requireAvailableAuthProvider("email");
   const { error } = await supabase().auth.signInWithOtp({
     email: email.trim(),
     options: { shouldCreateUser: true },
@@ -98,6 +114,7 @@ export async function requestSupabaseOtp(email: string): Promise<void> {
 }
 
 export async function verifySupabaseOtp(email: string, token: string): Promise<void> {
+  requireAvailableAuthProvider("email");
   const { data, error } = await supabase().auth.verifyOtp({
     type: "email",
     email: email.trim(),
@@ -118,7 +135,12 @@ function callbackError(params: URLSearchParams): Error | null {
   if (code === "bad_oauth_state") {
     return new Error("That Google sign-in could not be verified. Close other Cradle sign-in tabs and try once more.");
   }
-  return new Error(params.get("error_description") || "That sign-in could not be completed. Please try again.");
+  const description = params.get("error_description") || "";
+  if (/unsupported provider|provider is not enabled|provider.*disabled/i.test(`${code} ${description}`)) {
+    const alternatives = availableAuthProviders.map(({ label }) => label).join(" or ");
+    return new Error(`That sign-in option is not available yet.${alternatives ? ` Continue with ${alternatives}.` : " Please try again later."}`);
+  }
+  return new Error(description || "That sign-in could not be completed. Please try again.");
 }
 
 export async function completeSupabaseOAuth(): Promise<SupabaseExchangeResult | null> {

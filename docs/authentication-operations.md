@@ -15,6 +15,13 @@ Required client variables:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_SUPABASE_REDIRECT_URL` (must be an allowlisted HTTPS URL in production)
+- `VITE_AUTH_GOOGLE_ENABLED=true` only when Google is enabled and verified in the target Supabase project
+- `VITE_AUTH_APPLE_ENABLED=false` for Alpha until Apple Developer and Supabase configuration is complete
+- `VITE_AUTH_EMAIL_ENABLED=true` only when Email OTP delivery and verification are working
+
+Provider flags are explicit build-time capabilities and default to disabled. They must be configured in the Cloudflare Pages/Workers build environment because Vite replaces `VITE_*` values while building the browser bundle; runtime Worker variables do not retroactively change an already-built interface. The shared registry in `src/authProviders.ts` is the only client authority used by public sign-in, household creation, invitation acceptance, Email OTP, and future provider-linking controls. Supabase URL and anon key are also required before any provider becomes available. These are public browser configuration values, not service-role secrets.
+
+Alpha currently supports Google. Email may be enabled only after OTP is verified end-to-end. Apple must remain false until its external configuration is complete. A deployment with no available provider displays a recoverable configuration message instead of an empty panel.
 
 Required Cloudflare deployment variables/secrets:
 

@@ -24,7 +24,8 @@ import { CradleIcon } from "./components/ui/CradleIcon";
 import { AlphaFeedback } from "./AlphaFeedback";
 import { trackAlphaEvent } from "./alphaDiagnostics";
 import { SupabaseAuthActions } from "./SupabaseAuthActions";
-import { completeSupabaseOAuth, hasSupabaseOAuthCallback, takeSupabaseInvite } from "./supabaseAuth";
+import { completeSupabaseOAuth, hasSupabaseOAuthCallback, rememberAuthProviderError,
+  rememberSupabaseInvite, takeSupabaseInvite } from "./supabaseAuth";
 import { Operations } from "./Operations";
 
 type Role = "owner" | "parent_admin" | "adult" | "child";
@@ -329,8 +330,16 @@ export function App() {
         }
       }).catch((reason) => {
         if (cancelled) return;
-        setError(reason instanceof Error ? reason.message : "That sign-in could not be completed.");
-        setState(reason instanceof TransportError ? "network" : "problem");
+        const message = reason instanceof Error ? reason.message : "That sign-in could not be completed.";
+        rememberAuthProviderError(message);
+        const pendingInvite = takeSupabaseInvite();
+        if (pendingInvite) {
+          rememberSupabaseInvite(pendingInvite);
+          window.history.replaceState({}, "", `/invite/${encodeURIComponent(pendingInvite)}`);
+        } else {
+          window.history.replaceState({}, "", "/"); setView("sign-in");
+        }
+        setError(""); setState("public");
       });
     } else {
       void load();

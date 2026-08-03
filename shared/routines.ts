@@ -11,9 +11,12 @@ export const ROOM_TYPES = [
   { value: "child_bedroom", label: "Child bedroom" },
   { value: "hallway", label: "Hallway / entrance" },
   { value: "laundry", label: "Laundry / utility" },
+  { value: "utility", label: "Utility" },
   { value: "dining_room", label: "Dining room" },
   { value: "home_office", label: "Home office" },
   { value: "garden", label: "Garden / outdoor space" },
+  { value: "outdoor", label: "Outdoor" },
+  { value: "shared_space", label: "Shared space" },
   { value: "other", label: "Other room" }
 ] as const;
 export type RoomType = typeof ROOM_TYPES[number]["value"];
@@ -165,6 +168,25 @@ export function inferRoomType(name: string): RoomType {
   if (/\bdining\b/.test(value)) return "dining_room";
   if (/\b(office|study)\b/.test(value)) return "home_office";
   if (/\b(garden|yard|patio|balcony|outdoor)\b/.test(value)) return "garden";
+  return "other";
+}
+
+export const storageRoomType = (roomType: RoomType): Exclude<RoomType, "utility" | "outdoor" | "shared_space"> =>
+  roomType === "utility" ? "laundry" : roomType === "outdoor" ? "garden" : roomType === "shared_space" ? "other" : roomType;
+
+export function routineRoomMismatch(name: string, roomType: RoomType | null): string | null {
+  if (/\bkitchen\b/i.test(name) && roomType !== "kitchen") {
+    return "This task appears to be assigned to a space that is not marked as a kitchen.";
+  }
+  return null;
+}
+
+export function routineCategory(name: string, roomType: RoomType | null, templateKey = ""): "cleaning" | "care" | "meals" | "home_admin" | "other" {
+  const value = `${templateKey} ${name}`.toLowerCase();
+  if (/meal|kitchen|cook|food/.test(value)) return "meals";
+  if (/pet|care|feed|medication/.test(value)) return "care";
+  if (/clean|reset|tidy|laundry|bathroom|bedroom/.test(value) || roomType) return "cleaning";
+  if (/admin|post|calendar|plan/.test(value)) return "home_admin";
   return "other";
 }
 

@@ -2,7 +2,7 @@ import { authenticate, textField } from "../../auth";
 import { conflictError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success, validationError } from "../../http";
 import { optionalText, requireHouseholdManager, requireStep } from "../../setup";
 import type { CradleEnv } from "../../types";
-import { inferRoomType, isRoomType } from "../../../../shared/routines";
+import { inferRoomType, isRoomType, storageRoomType } from "../../../../shared/routines";
 import { generateRoutineDraft } from "../../routine-generation";
 type Context = { request: Request; env: CradleEnv };
 async function occupantIds(db: D1Database, householdId: string, body: Record<string, unknown>): Promise<string[]> {
@@ -22,14 +22,23 @@ async function occupantIds(db: D1Database, householdId: string, body: Record<str
 export async function onRequestGet({ request, env }: Context) {
   return handleApiRequest(request, async (requestId) => {
     const db = requireD1(env); const identity = await authenticate(request, db);
-    const rows = await db.prepare("SELECT id, name, description, room_type AS roomType, display_order AS displayOrder FROM rooms WHERE household_id = ? AND is_active = 1 ORDER BY display_order, created_at")
+    const includeArchived = new URL(request.url).searchParams.get("include") === "archived";
+    if (includeArchived) requireHouseholdManager(identity);
+    const rows = await db.prepare(`SELECT id, name, description, room_type AS roomType,
+      display_order AS displayOrder, is_active AS isActive, created_at AS createdAt, updated_at AS updatedAt
+      FROM rooms WHERE household_id = ? ${includeArchived ? "" : "AND is_active = 1"} ORDER BY is_active DESC, display_order, created_at`)
       .bind(identity.householdId).all();
     const occupants = await db.prepare(`SELECT room_id AS roomId, member_id AS memberId
       FROM room_occupants WHERE household_id = ? ORDER BY created_at`).bind(identity.householdId).all<{
         roomId: string; memberId: string
       }>();
+    const routines = await db.prepare(`SELECT id, room_id AS roomId, name, status FROM household_systems
+      WHERE household_id = ? AND room_id IS NOT NULL AND status != 'archived' ORDER BY name`).bind(identity.householdId).all<{
+        id: string; roomId: string; name: string; status: string
+      }>();
     return success({ rooms: rows.results.map((room) => ({
-      ...room, occupantMemberIds: occupants.results.filter(({ roomId }) => roomId === room.id).map(({ memberId }) => memberId)
+      ...room, occupantMemberIds: occupants.results.filter(({ roomId }) => roomId === room.id).map(({ memberId }) => memberId),
+      routines: routines.results.filter(({ roomId }) => roomId === room.id).map(({ id, name, status }) => ({ id, name, status }))
     })) }, requestId);
   });
 }
@@ -49,7 +58,7 @@ export async function onRequestPost({ request, env }: Context) {
     try {
       await db.batch([
         db.prepare("INSERT INTO rooms (id, household_id, name, description, room_type, display_order, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)")
-          .bind(id, identity.householdId, name, description, roomType, order?.value ?? 0, now, now),
+          .bind(id, identity.householdId, name, description, storageRoomType(roomType), order?.value ?? 0, now, now),
         ...occupants.map((memberId) => db.prepare(`INSERT INTO room_occupants
           (household_id, room_id, member_id, created_at) VALUES (?, ?, ?, ?)`)
           .bind(identity.householdId, id, memberId, now))

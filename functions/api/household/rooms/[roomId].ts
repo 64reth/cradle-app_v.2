@@ -2,7 +2,7 @@ import { authenticate, textField } from "../../auth";
 import { ApiError, conflictError, handleApiRequest, methodNotAllowed, parseJsonBody, requireD1, success, validationError } from "../../http";
 import { optionalText, requireHouseholdManager, requireStep } from "../../setup";
 import type { CradleEnv } from "../../types";
-import { inferRoomType, isRoomType } from "../../../../shared/routines";
+import { inferRoomType, isRoomType, storageRoomType } from "../../../../shared/routines";
 type Context = { request: Request; env: CradleEnv; params: { roomId: string } };
 async function occupants(db: D1Database, householdId: string, value: unknown): Promise<string[]> {
   if (!Array.isArray(value) || value.some((id) => typeof id !== "string") || new Set(value).size !== value.length) {
@@ -35,7 +35,7 @@ export async function onRequestPatch({ request, env, params }: Context) {
       if (!exists) throw new ApiError(404, "NOT_FOUND", "Room not found.");
       await db.batch([
         db.prepare("UPDATE rooms SET name = ?, description = ?, room_type = ?, updated_at = ? WHERE household_id = ? AND id = ? AND is_active = 1")
-          .bind(name, description, roomType, now, identity.householdId, params.roomId),
+          .bind(name, description, storageRoomType(roomType), now, identity.householdId, params.roomId),
         db.prepare("DELETE FROM room_occupants WHERE household_id = ? AND room_id = ?")
           .bind(identity.householdId, params.roomId),
         ...occupantMemberIds.map((memberId) => db.prepare(`INSERT INTO room_occupants
@@ -53,6 +53,12 @@ export async function onRequestDelete({ request, env, params }: Context) {
   return handleApiRequest(request, async (requestId) => {
     const db = requireD1(env); const identity = await authenticate(request, db); await permit(db, identity);
     await parseJsonBody(request);
+    const linked = await db.prepare(`SELECT count(*) AS count FROM household_systems
+      WHERE household_id = ? AND room_id = ? AND status != 'archived'`).bind(identity.householdId, params.roomId)
+      .first<{ count: number }>();
+    if (Number(linked?.count || 0) > 0) throw conflictError("Move or archive this room’s routines before archiving the room.", {
+      linkedRoutineCount: String(linked?.count || 0)
+    });
     const result = await db.prepare("UPDATE rooms SET is_active = 0, updated_at = ? WHERE household_id = ? AND id = ? AND is_active = 1")
       .bind(new Date().toISOString(), identity.householdId, params.roomId).run();
     if (!result.meta.changes) throw new ApiError(404, "NOT_FOUND", "Room not found.");

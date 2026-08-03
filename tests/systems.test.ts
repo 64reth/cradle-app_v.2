@@ -3,7 +3,7 @@ import type { Identity } from "../functions/api/auth";
 import { householdRoutineAccess, requireSystemsViewer } from "../functions/api/setup";
 import {
   ROOM_TYPES, ROUTINE_FREQUENCIES, ROUTINE_TEMPLATE_VERSION, ROUTINE_TEMPLATES,
-  displayRoutineName, inferRoomType, templatesForPet, templatesForRoom
+  displayRoutineName, inferRoomType, routineRoomMismatch, templatesForPet, templatesForRoom
 } from "../shared/routines";
 
 const identity: Identity = {
@@ -32,6 +32,14 @@ describe("dashboard routine recommendations", () => {
     expect(templatesForRoom("toilet")[0].defaultFrequency).toBe("daily");
     expect(templatesForRoom("bedroom")[0]).toMatchObject({ key: "bedroom.weekly_clean", defaultFrequency: "weekly" });
     expect(templatesForRoom("living_room")[0].defaultFrequency).toBe("weekly");
+  });
+
+  it("supports expanded space types and warns without changing mismatched assignments", () => {
+    expect(ROOM_TYPES.map(({ value }) => value)).toEqual(expect.arrayContaining(["utility", "outdoor", "shared_space"]));
+    expect(routineRoomMismatch("Evening kitchen reset", "bedroom")).toBe(
+      "This task appears to be assigned to a space that is not marked as a kitchen."
+    );
+    expect(routineRoomMismatch("Evening kitchen reset", "kitchen")).toBeNull();
   });
 
   it("uses a neutral, opt-in recommendation for unknown Rooms", () => {

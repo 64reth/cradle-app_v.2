@@ -28,11 +28,11 @@ export async function onRequestPatch({ request, env, params }: Context) {
     const legacyOwner = edit.assignedMemberId || edit.participantMemberIds[0] || existing.ownerMemberId;
     await db.batch([
       db.prepare(`UPDATE household_systems SET name = ?, frequency_key = ?, custom_frequency_note = ?, owner_member_id = ?,
-        rotation_enabled = ?, status = ?, notes = ?, template_customised = 1, updated_at = ?
+        rotation_enabled = ?, status = ?, notes = ?, room_id = ?, template_customised = 1, updated_at = ?
         WHERE household_id = ? AND id = ? AND status != 'archived'`)
         .bind(edit.name, edit.frequency, edit.customFrequencyNote, legacyOwner,
           edit.assignmentMode === "rotation" ? 1 : 0, edit.status, edit.note,
-          now, identity.householdId, params.systemId),
+          edit.roomId, now, identity.householdId, params.systemId),
       db.prepare(`UPDATE routine_assignments SET assignment_mode = ?, assigned_member_id = ?,
         rotation_next_index = CASE WHEN ? = 'rotation' THEN rotation_next_index % ? ELSE 0 END,
         updated_at = ? WHERE household_id = ? AND system_id = ?`)
