@@ -13,6 +13,7 @@ import { onRequest as authExchange } from "./api/auth/supabase/exchange";
 import { onRequest as dashboard } from "./api/dashboard";
 import { onRequest as opsAccounts } from "./api/ops/accounts";
 import { onRequest as opsAccount } from "./api/ops/accounts/[accountId]";
+import { onRequest as opsHealth } from "./api/ops/health";
 import { onRequest as event } from "./api/household/events/[eventId]";
 import { onRequest as events } from "./api/household/events/index";
 import { onRequest as invitations } from "./api/household/invitations";
@@ -98,7 +99,7 @@ const route = <T extends (context: never) => Promise<Response> | Response>(patte
 const routes: Route[] = [
   route("/health", health), route("/api/alpha/diagnostics", alphaDiagnostics), route("/api/alpha/events", alphaEvents), route("/api/alpha/feedback", alphaFeedback),
   route("/api/auth/households", authHouseholds), route("/api/auth/join", authJoin), route("/api/auth/session", authSession), route("/api/auth/session/refresh", authRefresh), route("/api/auth/sessions", authSessions), route("/api/auth/sessions/revoke-all", authRevokeAll), route("/api/auth/sign-in", authSignIn), route("/api/auth/sign-out", authSignOut), route("/api/auth/supabase/exchange", authExchange),
-  route("/api/dashboard", dashboard), route("/api/ops/accounts", opsAccounts), route("/api/ops/accounts/[accountId]", opsAccount),
+  route("/api/dashboard", dashboard), route("/api/ops/accounts", opsAccounts), route("/api/ops/accounts/[accountId]", opsAccount), route("/api/ops/health", opsHealth),
   route("/api/household/events", events), route("/api/household/events/[eventId]", event), route("/api/household/invitations", invitations), route("/api/household/invites", invites), route("/api/household/invites/[inviteId]/regenerate", inviteRegen), route("/api/household/invites/[inviteId]/revoke", inviteRevoke), route("/api/household/join-requests", joinRequests), route("/api/household/join-requests/[requestId]/approve", joinApprove), route("/api/household/join-requests/[requestId]/decline", joinDecline),
   route("/api/household/meal-plans", mealPlans), route("/api/household/meal-plans/[planId]", mealPlan), route("/api/household/meal-rotations", mealRotations), route("/api/household/meal-rotations/[rotationId]", mealRotation), route("/api/household/meals", meals), route("/api/household/meals/duplicates", mealDuplicates), route("/api/household/meals/favourites", mealFavourites), route("/api/household/meals/preferences", mealPreferences), route("/api/household/meals/suggestions", mealSuggestions),
   route("/api/household/members", members), route("/api/household/members/[memberId]", member), route("/api/household/members/[memberId]/avatar", memberAvatar), route("/api/household/members/[memberId]/companion", memberCompanion), route("/api/household/members/[memberId]/suspend", memberSuspend), route("/api/household/members/[memberId]/restore", memberRestore), route("/api/household/pets", pets), route("/api/household/pets/[petId]", pet), route("/api/household/rooms", rooms), route("/api/household/rooms/[roomId]", room), route("/api/household/rooms/reorder", roomReorder),
